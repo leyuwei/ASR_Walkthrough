@@ -1,0 +1,276 @@
+:root {
+  --bg: radial-gradient(circle at 20% 10%, #e8f3ff 0%, #f4f7fb 45%, #eef4ff 100%);
+  --card: #ffffff;
+  --line: #d9e3f2;
+  --text: #1b2b44;
+  --muted: #5f6f8b;
+  --primary: #2563eb;
+  --danger: #d91f4a;
+  --ok: #12805c;
+  --shadow: 0 12px 28px rgba(34, 58, 96, 0.12);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  min-height: 100vh;
+  font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  color: var(--text);
+  background: var(--bg);
+}
+
+.app {
+  width: min(920px, 100%);
+  margin: 0 auto;
+  padding: 18px 14px 30px;
+}
+
+.panel {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  padding: 16px;
+}
+
+.header {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.logo {
+  width: 70px;
+  height: 70px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #2f76ff 0%, #0db1ff 100%);
+  display: grid;
+  place-items: center;
+  box-shadow: 0 10px 24px rgba(35, 102, 219, 0.3);
+}
+
+.logo svg {
+  width: 46px;
+  height: 46px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 1.55rem;
+  letter-spacing: 0.3px;
+}
+
+.sub {
+  margin: 0;
+  color: var(--muted);
+  text-align: center;
+  font-size: 0.94rem;
+}
+
+.center {
+  display: grid;
+  justify-items: center;
+  margin: 14px 0 16px;
+}
+
+.record-wrap {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+}
+
+.record-btn {
+  width: 145px;
+  height: 145px;
+  border: none;
+  border-radius: 50%;
+  background: linear-gradient(150deg, #ff623b 0%, #f87912 100%);
+  color: #fff;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 14px 30px rgba(29, 83, 190, 0.34);
+  transition: transform 120ms ease, box-shadow 120ms ease, filter 120ms ease;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+  -webkit-touch-callout: none;
+}
+
+.record-btn:hover {
+  filter: brightness(1.02);
+}
+
+.record-btn.recording {
+  transform: scale(0.96);
+  background: linear-gradient(150deg, #ff4c72 0%, #d91f4a 100%);
+  box-shadow: 0 14px 30px rgba(200, 38, 80, 0.34);
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.status {
+  width: min(720px, 100%);
+  border-radius: 12px;
+  background: #eff5ff;
+  color: #2f4d7d;
+  border: 1px solid #d5e4ff;
+  min-height: 44px;
+  padding: 10px 12px;
+  display: grid;
+  align-items: center;
+  margin: 0 auto 14px;
+}
+
+.status.ok {
+  background: #e6fbf3;
+  border-color: #c7f3df;
+  color: var(--ok);
+}
+
+.status.warn {
+  background: #fff8e8;
+  border-color: #ffe5b5;
+  color: #8a6504;
+}
+
+.status.error {
+  background: #ffeaf0;
+  border-color: #ffc9d6;
+  color: var(--danger);
+}
+
+.toolbar {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-bottom: 10px;
+}
+
+.btn {
+  border: none;
+  border-radius: 10px;
+  padding: 9px 12px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.btn.ghost {
+  background: #edf3ff;
+  color: #2e4d88;
+}
+
+.btn.warn {
+  background: #ffe6ec;
+  color: #b01239;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.empty {
+  border: 1px dashed #c8d4eb;
+  border-radius: 12px;
+  color: #607292;
+  padding: 14px;
+  text-align: center;
+  background: #f8fbff;
+}
+
+.item {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  background: #fff;
+}
+
+.item-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.meta {
+  color: #3a4f73;
+  font-size: 0.88rem;
+  display: grid;
+  gap: 3px;
+}
+
+.badge {
+  border-radius: 999px;
+  padding: 4px 9px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.badge.processing {
+  background: #eff4ff;
+  color: #315ea9;
+}
+
+.badge.done {
+  background: #e8fbf4;
+  color: #12805c;
+}
+
+.badge.error {
+  background: #ffe8ef;
+  color: #c20f3a;
+}
+
+.block {
+  background: #f8fbff;
+  border: 1px solid #e5edfa;
+  border-radius: 10px;
+  padding: 8px 9px;
+  margin-top: 8px;
+}
+
+.label {
+  font-size: 0.78rem;
+  color: #5f769c;
+  margin-bottom: 4px;
+}
+
+.text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.45;
+  font-size: 0.92rem;
+}
+
+@media (max-width: 560px) {
+  .record-btn {
+    width: 124px;
+    height: 124px;
+  }
+
+  .toolbar {
+    justify-content: stretch;
+  }
+
+  .toolbar .btn {
+    flex: 1;
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "secretId": "",
+  "secretKey": "",
+  "apiEndpoint": "https://asr.tencentcloudapi.com",
+  "region": "ap-shanghai",
+  "proxyEndpoint": "api.php",
+  "callbackUrl": "",
+  "engineModelType": "16k_zh",
+  "channelNum": "1",
+  "resTextFormat": "0",
+  "pollIntervalMs": "2000",
+  "pollTimeoutSec": "600",
+  "voiceUrl": "",
+  "taskId": "",
+  "aiRelayEndpoint": "https://your-relay.example.com/v1",
+  "aiApiKey": "",
+  "aiModel": "gpt-5.3-codex",
+  "aiPromptTemplate": "你现在是智能驾驶问题信息凝练师，要按照严格的格式提炼并整理下方的文字。\n格式是：问题发生时间 | 地点 | 问题具体描述 | 问题类型。\n时间、地点、描述在下方的问题记录原文中都能找到，类型的话需要你做个简单聚类，常见的类型包括安全问题、效率问题、博弈问题、控速问题、违章违规问题。\n请注意：输出只能够有一行。\nOriginal text:\n{{text}}",
+  "aiAutoPostProcess": false
+}
+

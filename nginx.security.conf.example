@@ -1,0 +1,26 @@
+# Place these blocks inside your Nginx `server {}` block.
+
+# 1) Block direct download of app_config.json
+# Choose ONE that matches your URL prefix.
+
+# If app is served at https://your-domain/asr/...
+location = /asr/app_config.json {
+    return 404;
+}
+
+# If app is served at https://your-domain/...
+# location = /app_config.json {
+#     return 404;
+# }
+
+# 2) (Optional) Tighten access to config API at Nginx layer too
+# This blocks route=config unless from loopback.
+# Keep this only if you manage config from server-local requests.
+#
+# location = /asr/api.php {
+#     if ($arg_route = config) {
+#         allow 127.0.0.1;
+#         allow ::1;
+#         deny all;
+#     }
+# }

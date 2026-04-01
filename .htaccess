@@ -1,0 +1,7 @@
+# Block direct access to sensitive config file.
+<Files "app_config.json">
+  Require all denied
+</Files>
+
+# Optional hardening.
+Options -Indexes

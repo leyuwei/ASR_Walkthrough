@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>&#28120;&#27668;&#20845;&#23453;&#36208;&#26597;</title>
+  <link rel="stylesheet" href="index.css">
+</head>
+<body>
+  <main class="app">
+    <section class="panel">
+      <header class="header">
+        <div class="logo" aria-hidden="true">
+          <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="32" cy="32" r="30" fill="rgba(255,255,255,0.2)"/>
+            <circle cx="20" cy="20" r="5.2" fill="#fff"/>
+            <circle cx="32" cy="16.5" r="5.2" fill="#fff"/>
+            <circle cx="44" cy="20" r="5.2" fill="#fff"/>
+            <path d="M20 37.5C20 30.6 44 30.6 44 37.5C44 43.8 39.2 49 32 49C24.8 49 20 43.8 20 37.5Z" fill="#fff"/>
+          </svg>
+        </div>
+        <h1>&#28120;&#27668;&#20845;&#23453;&#36208;&#26597;</h1>
+        <p class="sub">
+          &#25353;&#20303;&#24405;&#38899;&#65292;&#26494;&#24320;&#32467;&#26463;&#12290;&#31995;&#32479;&#33258;&#21160;&#25191;&#34892;&#65306;&#26102;&#38388;&#22320;&#28857;&#35760;&#24405; &#8594; ASR &#8594; AI &#20998;&#26512;&#12290;
+        </p>
+      </header>
+
+      <div class="center">
+        <div class="record-wrap">
+          <button id="recordBtn" class="record-btn" type="button">
+            &#25353;&#20303;&#24405;&#38899;
+          </button>
+          <div class="hint" id="recordHint">松手即为停止，如无响应，可再轻点一下以停止录制。</div>
+        </div>
+      </div>
+
+      <div id="status" class="status">
+        &#23601;&#32490;&#12290;
+      </div>
+
+      <div class="toolbar">
+        <button id="exportBtn" class="btn ghost" type="button">&#23548;&#20986; TXT</button>
+        <button id="clearBtn" class="btn warn" type="button">&#19968;&#38190;&#28165;&#31354;</button>
+      </div>
+
+      <ul id="recordList" class="list"></ul>
+      <div id="emptyView" class="empty">
+        &#26242;&#26080;&#35760;&#24405;&#12290;&#25353;&#20303;&#20013;&#38388;&#24405;&#38899;&#38190;&#24320;&#22987;&#12290;
+      </div>
+    </section>
+  </main>
+
+  <script src="index.js"></script>
+</body>
+</html>

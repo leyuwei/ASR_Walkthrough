@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Tencent ASR Helper (PHP)</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="app">
+    <header class="hero card">
+      <h1>Tencent Cloud ASR Helper</h1>
+      <p>LAMP edition: browser calls local PHP API, and PHP handles signing/forwarding.</p>
+    </header>
+
+    <section class="card">
+      <h2>1. Service Config</h2>
+      <div class="field">
+        <label for="secretId">SecretId</label>
+        <input id="secretId" type="text" placeholder="Enter Tencent SecretId" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="secretKey">SecretKey</label>
+        <input id="secretKey" type="password" placeholder="Enter Tencent SecretKey" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="apiEndpoint">Tencent API Endpoint</label>
+        <input id="apiEndpoint" type="url" autocomplete="off" placeholder="https://asr.tencentcloudapi.com">
+      </div>
+      <div class="field">
+        <label for="region">Region</label>
+        <input id="region" type="text" autocomplete="off" placeholder="ap-shanghai">
+      </div>
+      <div class="field">
+        <label for="proxyEndpoint">PHP API Endpoint</label>
+        <input id="proxyEndpoint" type="text" autocomplete="off" placeholder="api.php">
+      </div>
+      <div class="field">
+        <label for="configApiToken">Config API Token (route=config)</label>
+        <input id="configApiToken" type="password" autocomplete="off" placeholder="Required for remote config read/write when CONFIG_API_TOKEN is enabled">
+      </div>
+      <div class="actions two-cols">
+        <button id="loadConfigFileBtn" type="button" class="ghost">Load Config File</button>
+        <button id="saveConfigFileBtn" type="button" class="ghost">Save Config File</button>
+      </div>
+      <div class="field">
+        <label for="callbackUrl">CallbackUrl (Optional)</label>
+        <input id="callbackUrl" type="url" autocomplete="off" placeholder="Tencent callback URL after completion">
+      </div>
+      <p class="tip">Config API token is browser-local only and is not written into <code>app_config.json</code>.</p>
+    </section>
+
+    <section class="card">
+      <h2>2. ASR Params</h2>
+      <div class="field">
+        <label for="engineModelType">EngineModelType</label>
+        <select id="engineModelType">
+          <option value="16k_zh">16k_zh (Chinese)</option>
+          <option value="16k_en">16k_en (English)</option>
+          <option value="16k_ca">16k_ca (Cantonese)</option>
+          <option value="16k_ja">16k_ja (Japanese)</option>
+          <option value="16k_zh_video">16k_zh_video (Video)</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="channelNum">ChannelNum</label>
+        <select id="channelNum">
+          <option value="1">1 (Mono)</option>
+          <option value="2">2 (Stereo)</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="resTextFormat">ResTextFormat</label>
+        <select id="resTextFormat">
+          <option value="0">0 (UTF-8)</option>
+          <option value="1">1 (GB2312)</option>
+          <option value="2">2 (GBK)</option>
+          <option value="3">3 (BIG5)</option>
+          <option value="4">4 (BIG5HKSCS)</option>
+          <option value="5">5 (UTF-8 SIC)</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="pollIntervalMs">Poll Interval (ms)</label>
+        <input id="pollIntervalMs" type="number" min="500" step="100" placeholder="2000">
+      </div>
+      <div class="field">
+        <label for="pollTimeoutSec">Poll Timeout (sec)</label>
+        <input id="pollTimeoutSec" type="number" min="10" step="10" placeholder="600">
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>3. Audio Source</h2>
+      <div class="record-row">
+        <button id="recordBtn" type="button" class="record-btn">Start Recording</button>
+        <span id="recordTimer" class="timer">00:00</span>
+      </div>
+      <audio id="audioPreview" controls></audio>
+      <div class="actions two-cols">
+        <button id="clearAudioBtn" type="button" class="ghost">Clear Recording</button>
+      </div>
+      <div class="field">
+        <label for="voiceUrl">VoiceUrl (Preferred)</label>
+        <textarea id="voiceUrl" rows="3" placeholder="If provided, submit with SourceType=0. Otherwise use local recording as Base64 Data."></textarea>
+      </div>
+      <p class="tip">Data mode is limited by Tencent API. Audio size must be less than 5MB.</p>
+    </section>
+
+    <section class="card">
+      <h2>4. Submit & Query</h2>
+      <div class="actions two-cols">
+        <button id="transcribeBtn" type="button" class="primary">Submit Task and Poll</button>
+        <button id="queryTaskBtn" type="button" class="ghost">Query TaskId Only</button>
+      </div>
+      <div class="field">
+        <label for="taskId">TaskId</label>
+        <input id="taskId" type="text" placeholder="Auto-filled after submit, or enter manually to query">
+      </div>
+      <div id="status" class="status"></div>
+    </section>
+
+    <section class="card">
+      <h2>5. AI Post Process (CODEX API)</h2>
+      <div class="field">
+        <label for="aiRelayEndpoint">AI Relay Endpoint</label>
+        <input id="aiRelayEndpoint" type="url" autocomplete="off" placeholder="For example: https://your-relay.example.com/v1/chat/completions">
+      </div>
+      <div class="field">
+        <label for="aiApiKey">AI API Key</label>
+        <input id="aiApiKey" type="password" autocomplete="off" placeholder="Optional if backend uses OPENAI_API_KEY">
+      </div>
+      <div class="field">
+        <label for="aiModel">AI Model</label>
+        <input id="aiModel" type="text" autocomplete="off" placeholder="For example: codex-mini-latest">
+      </div>
+      <div class="field">
+        <label for="aiPromptTemplate">Prompt Template (supports {{text}})</label>
+        <textarea id="aiPromptTemplate" rows="6" placeholder="You are an ASR post-processing assistant.\n\nOriginal text:\n{{text}}"></textarea>
+      </div>
+      <label class="checkbox" for="aiAutoPostProcess">
+        <input id="aiAutoPostProcess" type="checkbox">
+        Auto run AI post-process after ASR completion
+      </label>
+      <div class="actions">
+        <button id="runAiBtn" type="button" class="ghost">Run AI Post Process on Current ASR Text</button>
+      </div>
+      <p class="tip">If {{text}} is not present, ASR text will be appended automatically.</p>
+    </section>
+
+    <section class="card">
+      <h2>6. Results</h2>
+      <div class="field">
+        <label for="resultText">ASR Text</label>
+        <textarea id="resultText" rows="6" placeholder="ASR output appears here"></textarea>
+      </div>
+      <div class="field">
+        <label for="aiResultText">AI Post-Processed Text</label>
+        <textarea id="aiResultText" rows="6" placeholder="AI output appears here"></textarea>
+      </div>
+      <div class="field">
+        <label for="rawJson">ASR Raw JSON</label>
+        <textarea id="rawJson" rows="10" placeholder="Full ASR response appears here"></textarea>
+      </div>
+      <div class="field">
+        <label for="aiRawJson">AI Raw JSON</label>
+        <textarea id="aiRawJson" rows="10" placeholder="Full AI response appears here"></textarea>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
