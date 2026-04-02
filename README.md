@@ -1,4 +1,6 @@
-# LiAuto Walkthrough (PHP + Nginx/Apache)
+# ASR Walkthrough (PHP + Nginx/Apache)
+
+工程化场景下走查快速记录（一键录音-转文字-AI分析-导出）
 
 Core point: this project works only when `app_config.json` is configured correctly.
 
