@@ -5,6 +5,9 @@ const API_VERSION = '2019-06-14';
 const API_SERVICE = 'asr';
 const CONTENT_TYPE = 'application/json; charset=utf-8';
 const AI_DEFAULT_CHAT_PATH = '/v1/chat/completions';
+const APP_AUTH_COOKIE = 'liubao_auth';
+const APP_AUTH_COOKIE_TTL_SEC = 2592000; // 30 days
+const APP_AUTH_CODE_HASH = '46aa55a4077980a09d338e85986dd05f95f0f475719c441b870556a309734789';
 
 const DEFAULT_CONFIG = [
     'secretId' => '',
@@ -43,6 +46,10 @@ try {
 function route_request(): void
 {
     $route = trim((string)($_GET['route'] ?? ''));
+    if ($route === 'auth') {
+        handle_auth_route();
+        return;
+    }
     if ($route === 'config') {
         handle_config_route();
         return;
@@ -112,8 +119,199 @@ function is_loopback_request(): bool
     return in_array($remoteAddr, ['127.0.0.1', '::1', '::ffff:127.0.0.1'], true);
 }
 
+function handle_auth_route(): void
+{
+    $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+    if ($method === 'GET') {
+        send_json(200, ['authorized' => is_app_session_authorized()]);
+        return;
+    }
+    if ($method !== 'POST') {
+        send_json(405, ['message' => 'Method Not Allowed']);
+        return;
+    }
+
+    $request = read_json_body();
+    if (!is_array($request)) {
+        send_json(400, ['message' => 'Request body must be a JSON object']);
+        return;
+    }
+
+    $action = trim((string)($request['action'] ?? 'login'));
+    if ($action === '' || $action === 'status') {
+        send_json(200, ['authorized' => is_app_session_authorized()]);
+        return;
+    }
+
+    if ($action === 'logout') {
+        clear_auth_cookie();
+        send_json(200, ['authorized' => false]);
+        return;
+    }
+
+    if ($action === 'login') {
+        $code = trim((string)($request['code'] ?? ''));
+        if ($code === '') {
+            send_json(400, ['authorized' => false, 'message' => 'Missing code']);
+            return;
+        }
+        if (!verify_app_authorization_code($code)) {
+            clear_auth_cookie();
+            usleep(150000);
+            send_json(401, ['authorized' => false, 'message' => 'Invalid access code']);
+            return;
+        }
+
+        issue_auth_cookie();
+        send_json(200, ['authorized' => true]);
+        return;
+    }
+
+    send_json(400, ['message' => 'Unsupported auth action']);
+}
+
+function verify_app_authorization_code(string $code): bool
+{
+    $expectedHash = trim((string)(getenv('APP_AUTH_CODE_HASH') ?: ''));
+    if ($expectedHash === '') {
+        $expectedHash = APP_AUTH_CODE_HASH;
+    }
+
+    $expectedHash = strtolower($expectedHash);
+    $codeHash = strtolower(hash('sha256', $code));
+    return hash_equals($expectedHash, $codeHash);
+}
+
+function require_app_session(): void
+{
+    if (is_app_session_authorized()) {
+        return;
+    }
+
+    clear_auth_cookie();
+    send_json(401, ['message' => 'Unauthorized']);
+    exit;
+}
+
+function is_app_session_authorized(): bool
+{
+    $cookie = trim((string)($_COOKIE[APP_AUTH_COOKIE] ?? ''));
+    if ($cookie === '') {
+        return false;
+    }
+
+    $decoded = base64_url_decode($cookie);
+    if ($decoded === '') {
+        return false;
+    }
+
+    $parts = explode('.', $decoded, 2);
+    if (count($parts) !== 2) {
+        return false;
+    }
+
+    $expiresAtRaw = $parts[0] ?? '';
+    $signature = $parts[1] ?? '';
+    if ($expiresAtRaw === '' || $signature === '' || !ctype_digit($expiresAtRaw)) {
+        return false;
+    }
+
+    $expiresAt = (int)$expiresAtRaw;
+    if ($expiresAt < time()) {
+        return false;
+    }
+
+    $expectedSignature = hash_hmac('sha256', $expiresAtRaw, app_auth_cookie_secret());
+    return hash_equals($expectedSignature, $signature);
+}
+
+function issue_auth_cookie(): void
+{
+    $expiresAt = time() + APP_AUTH_COOKIE_TTL_SEC;
+    $token = build_auth_cookie_token($expiresAt);
+    setcookie(APP_AUTH_COOKIE, $token, [
+        'expires' => $expiresAt,
+        'path' => '/',
+        'secure' => is_https_request(),
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+}
+
+function clear_auth_cookie(): void
+{
+    setcookie(APP_AUTH_COOKIE, '', [
+        'expires' => time() - 3600,
+        'path' => '/',
+        'secure' => is_https_request(),
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+}
+
+function build_auth_cookie_token(int $expiresAt): string
+{
+    $expiresAtRaw = (string)$expiresAt;
+    $signature = hash_hmac('sha256', $expiresAtRaw, app_auth_cookie_secret());
+    return base64_url_encode($expiresAtRaw . '.' . $signature);
+}
+
+function app_auth_cookie_secret(): string
+{
+    static $cached = null;
+    if ($cached !== null) {
+        return $cached;
+    }
+
+    $configured = trim((string)(getenv('APP_AUTH_COOKIE_SECRET') ?: ''));
+    if ($configured !== '') {
+        $cached = $configured;
+        return $cached;
+    }
+
+    $fallbackMaterial = implode('|', [
+        __FILE__,
+        (string)($_SERVER['SERVER_NAME'] ?? ''),
+        (string)(getenv('TENCENT_SECRET_KEY') ?: ''),
+    ]);
+    $cached = hash('sha256', $fallbackMaterial);
+    return $cached;
+}
+
+function is_https_request(): bool
+{
+    $https = strtolower(trim((string)($_SERVER['HTTPS'] ?? '')));
+    if ($https !== '' && $https !== 'off') {
+        return true;
+    }
+
+    $forwardedProto = strtolower(trim((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')));
+    return $forwardedProto === 'https';
+}
+
+function base64_url_encode(string $input): string
+{
+    return rtrim(strtr(base64_encode($input), '+/', '-_'), '=');
+}
+
+function base64_url_decode(string $input): string
+{
+    $base64 = strtr($input, '-_', '+/');
+    $mod = strlen($base64) % 4;
+    if ($mod > 0) {
+        $base64 .= str_repeat('=', 4 - $mod);
+    }
+    $decoded = base64_decode($base64, true);
+    if ($decoded === false) {
+        return '';
+    }
+    return $decoded;
+}
+
 function handle_asr_route(): void
 {
+    require_app_session();
+
     if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
         send_json(405, ['message' => 'Method Not Allowed']);
         return;
@@ -217,6 +415,8 @@ function apply_asr_payload_defaults(string $action, array $payload, array $confi
 
 function handle_ai_route(): void
 {
+    require_app_session();
+
     if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
         send_json(405, ['message' => 'Method Not Allowed']);
         return;

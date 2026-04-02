@@ -7,7 +7,20 @@
   <link rel="stylesheet" href="index.css">
 </head>
 <body>
-  <main class="app">
+  <section id="authGate" class="auth-gate" aria-live="polite">
+    <div class="auth-card">
+      <h2>&#20351;&#29992;&#25480;&#26435;</h2>
+      <p>&#35831;&#36755;&#20837;&#25480;&#26435;&#30721;&#21518;&#32487;&#32493;&#12290;</p>
+      <form id="authForm" autocomplete="off">
+        <label class="sr-only" for="authCodeInput">&#25480;&#26435;&#30721;</label>
+        <input id="authCodeInput" class="auth-input" type="password" name="code" placeholder="&#35831;&#36755;&#20837;&#25480;&#26435;&#30721;" required>
+        <button id="authSubmitBtn" class="btn primary auth-submit" type="submit">&#39564;&#35777;&#24182;&#36827;&#20837;</button>
+      </form>
+      <div id="authMessage" class="auth-message" role="status"></div>
+    </div>
+  </section>
+
+  <main id="mainApp" class="app app-locked" hidden>
     <section class="panel">
       <header class="header">
         <div class="logo" aria-hidden="true">
@@ -39,6 +52,7 @@
       </div>
 
       <div class="toolbar">
+        <button id="logoutBtn" class="btn ghost" type="button">&#36864;&#20986;&#25480;&#26435;</button>
         <button id="exportBtn" class="btn ghost" type="button">&#23548;&#20986; TXT</button>
         <button id="clearBtn" class="btn warn" type="button">&#19968;&#38190;&#28165;&#31354;</button>
       </div>

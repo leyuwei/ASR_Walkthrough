@@ -27,6 +27,75 @@ body {
   background: var(--bg);
 }
 
+body:not(.authed) .app {
+  display: none;
+}
+
+body.authed .auth-gate {
+  display: none;
+}
+
+.auth-gate {
+  min-height: 100vh;
+  padding: 16px;
+  display: grid;
+  place-items: center;
+}
+
+.auth-card {
+  width: min(420px, 100%);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  padding: 20px;
+}
+
+.auth-card h2 {
+  margin: 0 0 6px;
+  font-size: 1.3rem;
+}
+
+.auth-card p {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.auth-input {
+  width: 100%;
+  border: 1px solid #c9d8ef;
+  border-radius: 10px;
+  padding: 11px 12px;
+  outline: none;
+  font-size: 0.95rem;
+}
+
+.auth-input:focus {
+  border-color: #6fa0ff;
+  box-shadow: 0 0 0 3px rgba(48, 110, 229, 0.14);
+}
+
+.auth-submit {
+  margin-top: 10px;
+  width: 100%;
+}
+
+.auth-message {
+  min-height: 22px;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.auth-message.error {
+  color: var(--danger);
+}
+
+.auth-message.ok {
+  color: var(--ok);
+}
+
 .app {
   width: min(920px, 100%);
   margin: 0 auto;
@@ -168,6 +237,11 @@ h1 {
   cursor: pointer;
 }
 
+.btn.primary {
+  background: linear-gradient(135deg, #2f76ff 0%, #0b9fff 100%);
+  color: #fff;
+}
+
 .btn.ghost {
   background: #edf3ff;
   color: #2e4d88;
@@ -258,6 +332,17 @@ h1 {
   word-break: break-word;
   line-height: 1.45;
   font-size: 0.92rem;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
 }
 
 @media (max-width: 560px) {

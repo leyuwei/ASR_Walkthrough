@@ -6,15 +6,23 @@ const POLL_INTERVAL_MS = 2000;
 const POLL_TIMEOUT_MS = 10 * 60 * 1000;
 const RECORDING_SAFETY_TIMEOUT_MS = 2 * 60 * 1000;
 const GEO_LOOKUP_TIMEOUT_MS = 8000;
+const AUTH_SUBMIT_DEFAULT_TEXT = "\u9a8c\u8bc1\u5e76\u8fdb\u5165";
 
 const refs = {
+  authGate: document.getElementById("authGate"),
+  mainApp: document.getElementById("mainApp"),
   recordBtn: document.getElementById("recordBtn"),
   recordHint: document.getElementById("recordHint"),
   status: document.getElementById("status"),
   exportBtn: document.getElementById("exportBtn"),
   clearBtn: document.getElementById("clearBtn"),
   recordList: document.getElementById("recordList"),
-  emptyView: document.getElementById("emptyView")
+  emptyView: document.getElementById("emptyView"),
+  authForm: document.getElementById("authForm"),
+  authCodeInput: document.getElementById("authCodeInput"),
+  authSubmitBtn: document.getElementById("authSubmitBtn"),
+  authMessage: document.getElementById("authMessage"),
+  logoutBtn: document.getElementById("logoutBtn")
 };
 
 const workflows = new Map();
@@ -35,14 +43,157 @@ let pendingStopAfterStart = false;
 let isFinalizingRecording = false;
 let recordingSafetyTimerId = null;
 let pendingRecordContext = null;
+let appInitialized = false;
+let isAuthSubmitting = false;
 
-init();
+void bootstrap();
+
+async function bootstrap() {
+  bindAuthEvents();
+  setAuthFormBusy(true);
+  setAuthMessage("\u6b63\u5728\u68c0\u67e5\u6388\u6743\u72b6\u6001...", "");
+
+  const authorized = await fetchAuthorizationStatus();
+  setAuthFormBusy(false);
+
+  if (authorized) {
+    unlockApp();
+    return;
+  }
+
+  lockApp("\u8bf7\u8f93\u5165\u6388\u6743\u7801\u4ee5\u7ee7\u7eed\u3002");
+}
 
 function init() {
+  if (appInitialized) {
+    return;
+  }
+  appInitialized = true;
+
   loadRecords();
   bindEvents();
   renderList();
   setStatus("\u5c31\u7eea\u3002", "");
+}
+
+function bindAuthEvents() {
+  if (refs.authForm) {
+    refs.authForm.addEventListener("submit", onAuthSubmit);
+  }
+  if (refs.logoutBtn) {
+    refs.logoutBtn.addEventListener("click", onLogoutClick);
+  }
+}
+
+async function fetchAuthorizationStatus() {
+  try {
+    const { response, json } = await requestPhpApi("auth", { method: "GET" });
+    return response.ok && json?.authorized === true;
+  } catch {
+    setAuthMessage("\u6388\u6743\u72b6\u6001\u68c0\u67e5\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5\u3002", "error");
+    return false;
+  }
+}
+
+async function onAuthSubmit(event) {
+  event.preventDefault();
+  if (isAuthSubmitting) {
+    return;
+  }
+
+  const code = String(refs.authCodeInput?.value || "").trim();
+  if (!code) {
+    setAuthMessage("\u8bf7\u8f93\u5165\u6388\u6743\u7801\u3002", "error");
+    refs.authCodeInput?.focus();
+    return;
+  }
+
+  isAuthSubmitting = true;
+  setAuthFormBusy(true);
+  setAuthMessage("\u6b63\u5728\u9a8c\u8bc1...", "");
+
+  try {
+    const { response, json } = await requestPhpApi("auth", {
+      method: "POST",
+      payload: {
+        action: "login",
+        code
+      }
+    });
+
+    if (response.ok && json?.authorized === true) {
+      unlockApp();
+      return;
+    }
+
+    setAuthMessage(String(json?.message || "\u6388\u6743\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5\u3002"), "error");
+    refs.authCodeInput?.focus();
+    refs.authCodeInput?.select();
+  } catch {
+    setAuthMessage("\u7f51\u7edc\u5f02\u5e38\uff0c\u8bf7\u91cd\u8bd5\u3002", "error");
+  } finally {
+    isAuthSubmitting = false;
+    setAuthFormBusy(false);
+  }
+}
+
+async function onLogoutClick() {
+  if (isRecording || isStartingRecording) {
+    await requestStopRecording("manual_logout");
+  }
+  setAuthFormBusy(true);
+  try {
+    await requestPhpApi("auth", {
+      method: "POST",
+      payload: { action: "logout" }
+    });
+  } catch {
+    // Ignore logout transport errors and force lock UI.
+  } finally {
+    setAuthFormBusy(false);
+    lockApp("\u5df2\u9000\u51fa\u6388\u6743\uff0c\u8bf7\u91cd\u65b0\u8f93\u5165\u6388\u6743\u7801\u3002");
+  }
+}
+
+function unlockApp() {
+  document.body.classList.add("authed");
+  refs.authGate?.setAttribute("hidden", "");
+  refs.mainApp?.removeAttribute("hidden");
+  if (refs.authCodeInput) {
+    refs.authCodeInput.value = "";
+  }
+  setAuthMessage("", "");
+  init();
+}
+
+function lockApp(message, type = "") {
+  document.body.classList.remove("authed");
+  refs.authGate?.removeAttribute("hidden");
+  refs.mainApp?.setAttribute("hidden", "");
+  setAuthMessage(message || "\u8bf7\u8f93\u5165\u6388\u6743\u7801\u4ee5\u7ee7\u7eed\u3002", type);
+  if (refs.authCodeInput) {
+    refs.authCodeInput.focus();
+  }
+}
+
+function handleSessionExpired() {
+  if (!document.body.classList.contains("authed")) {
+    return;
+  }
+  if (isRecording || isStartingRecording) {
+    void requestStopRecording("session_expired");
+  }
+  lockApp("\u6388\u6743\u72b6\u6001\u5df2\u5931\u6548\uff0c\u8bf7\u91cd\u65b0\u8f93\u5165\u6388\u6743\u7801\u3002", "error");
+}
+
+function setAuthFormBusy(isBusy) {
+  if (refs.authCodeInput) {
+    refs.authCodeInput.disabled = isBusy;
+  }
+  if (refs.authSubmitBtn) {
+    refs.authSubmitBtn.disabled = isBusy;
+    refs.authSubmitBtn.textContent = isBusy ? "\u9a8c\u8bc1\u4e2d..." : AUTH_SUBMIT_DEFAULT_TEXT;
+  }
 }
 
 function bindEvents() {
@@ -569,12 +720,16 @@ async function requestPhpApi(route, { method = "GET", payload = undefined } = {}
     const options = {
       method,
       headers: { "Content-Type": CONTENT_TYPE },
+      credentials: "same-origin",
       signal: controller.signal
     };
     if (payload !== undefined) {
       options.body = JSON.stringify(payload);
     }
     const response = await fetch(endpoint, options);
+    if (response.status === 401 && route !== "auth") {
+      handleSessionExpired();
+    }
     const text = await response.text();
     const json = safeJsonParse(text);
     return { response, text, json };
@@ -1014,6 +1169,14 @@ function cleanupAudioGraph() {
     audioContext.close();
     audioContext = null;
   }
+}
+
+function setAuthMessage(message, type = "") {
+  if (!refs.authMessage) {
+    return;
+  }
+  refs.authMessage.className = `auth-message ${type}`.trim();
+  refs.authMessage.textContent = message || "";
 }
 
 function setStatus(message, type = "") {
