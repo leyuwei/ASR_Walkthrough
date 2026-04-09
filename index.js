@@ -22,10 +22,17 @@ const refs = {
   authCodeInput: document.getElementById("authCodeInput"),
   authSubmitBtn: document.getElementById("authSubmitBtn"),
   authMessage: document.getElementById("authMessage"),
-  logoutBtn: document.getElementById("logoutBtn")
+  logoutBtn: document.getElementById("logoutBtn"),
+  exportModal: document.getElementById("exportModal"),
+  exportForm: document.getElementById("exportForm"),
+  exportWeather: document.getElementById("exportWeather"),
+  exportStartTime: document.getElementById("exportStartTime"),
+  exportCancelBtn: document.getElementById("exportCancelBtn")
 };
 
 const workflows = new Map();
+const recordAudioBlobs = new Map();
+const retryingRecords = new Set();
 let records = [];
 let listGeneration = 0;
 
@@ -45,6 +52,7 @@ let recordingSafetyTimerId = null;
 let pendingRecordContext = null;
 let appInitialized = false;
 let isAuthSubmitting = false;
+let previousFocusedElement = null;
 
 void bootstrap();
 
@@ -170,6 +178,7 @@ function lockApp(message, type = "") {
   document.body.classList.remove("authed");
   refs.authGate?.removeAttribute("hidden");
   refs.mainApp?.setAttribute("hidden", "");
+  closeExportModal();
   setAuthMessage(message || "\u8bf7\u8f93\u5165\u6388\u6743\u7801\u4ee5\u7ee7\u7eed\u3002", type);
   if (refs.authCodeInput) {
     refs.authCodeInput.focus();
@@ -211,9 +220,21 @@ function bindEvents() {
   window.addEventListener("blur", onWindowBlur, true);
   window.addEventListener("pagehide", onWindowPageHide, true);
   document.addEventListener("visibilitychange", onVisibilityChange, true);
+  document.addEventListener("keydown", onDocumentKeyDown, true);
 
   refs.exportBtn.addEventListener("click", onExportTxt);
   refs.clearBtn.addEventListener("click", onClearAll);
+  refs.recordList.addEventListener("click", onRecordListClick);
+
+  if (refs.exportForm) {
+    refs.exportForm.addEventListener("submit", onExportFormSubmit);
+  }
+  if (refs.exportCancelBtn) {
+    refs.exportCancelBtn.addEventListener("click", closeExportModal);
+  }
+  if (refs.exportModal) {
+    refs.exportModal.addEventListener("click", onExportBackdropClick);
+  }
 }
 
 async function onRecordPointerDown(event) {
@@ -378,6 +399,46 @@ async function onVisibilityChange() {
   await requestStopRecording("visibility_hidden");
 }
 
+function onDocumentKeyDown(event) {
+  if (event.key !== "Escape") {
+    return;
+  }
+  if (!isExportModalOpen()) {
+    return;
+  }
+  event.preventDefault();
+  closeExportModal();
+}
+
+function onExportBackdropClick(event) {
+  if (event.target !== refs.exportModal) {
+    return;
+  }
+  closeExportModal();
+}
+
+function onRecordListClick(event) {
+  const target = event.target instanceof Element ? event.target : null;
+  if (!target) {
+    return;
+  }
+
+  const retryBtn = target.closest("[data-action='retry']");
+  if (!retryBtn) {
+    return;
+  }
+
+  const recordId = String(retryBtn.getAttribute("data-record-id") || "");
+  if (!recordId) {
+    return;
+  }
+  void retryFailedRecord(recordId);
+}
+
+function isExportModalOpen() {
+  return Boolean(refs.exportModal && !refs.exportModal.hasAttribute("hidden"));
+}
+
 async function startRecording() {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     setStatus("\u6d4f\u89c8\u5668\u4e0d\u652f\u6301\u5f55\u97f3\u3002", "error");
@@ -492,27 +553,13 @@ async function finalizeRecording() {
     renderList();
     setStatus(`\u5df2\u63d0\u4ea4\u7b2c ${records.length} \u6761\u5de5\u4f5c\u6d41...`, "warn");
 
-    const workflowPromise = runWorkflow({
+    recordAudioBlobs.set(id, blob);
+    startWorkflowForRecord({
       recordId: id,
       generation,
-      blob,
+      audioBlob: blob,
       locationPromise
-    })
-      .catch((err) => {
-        updateRecord(id, {
-          status: "error",
-          error: normalizeErrorMessage(err),
-          location: resolveRecord(id)?.location || "\u672a\u77e5\u5730\u70b9"
-        });
-        setStatus(`\u4efb\u52a1\u5931\u8d25: ${normalizeErrorMessage(err)}`, "error");
-      })
-      .finally(() => {
-        workflows.delete(id);
-        saveRecords();
-        renderList();
-      });
-
-    workflows.set(id, workflowPromise);
+    });
   } finally {
     resetPressSessionState();
     isFinalizingRecording = false;
@@ -570,15 +617,28 @@ function consumeRecordContext() {
   return createRecordContextAtPress();
 }
 
-async function runWorkflow({ recordId, generation, blob, locationPromise }) {
+async function runWorkflow({
+  recordId,
+  generation,
+  audioBlob = null,
+  locationPromise = undefined,
+  skipAsr = false
+}) {
   if (generation !== listGeneration) {
     return;
   }
-  if (!resolveRecord(recordId)) {
+  const recordAtStart = resolveRecord(recordId);
+  if (!recordAtStart) {
     return;
   }
 
-  const safeLocationPromise = Promise.resolve(locationPromise).catch(() => "\u5b9a\u4f4d\u5931\u8d25\u6216\u88ab\u62d2\u7edd");
+  const initialLocation = toCleanText(recordAtStart.location) || "\u672a\u77e5\u5730\u70b9";
+  const safeLocationPromise = Promise.resolve(
+    locationPromise === undefined ? initialLocation : locationPromise
+  )
+    .then((location) => toCleanText(location) || "\u672a\u77e5\u5730\u70b9")
+    .catch(() => "\u5b9a\u4f4d\u5931\u8d25\u6216\u88ab\u62d2\u7edd");
+
   safeLocationPromise.then((location) => {
     if (generation !== listGeneration) {
       return;
@@ -589,25 +649,38 @@ async function runWorkflow({ recordId, generation, blob, locationPromise }) {
     updateRecord(recordId, { location });
   });
 
-  const createPayload = {
-    SourceType: 1,
-    DataLen: blob.size,
-    Data: await blobToBase64(blob)
-  };
+  let asrText = toCleanText(recordAtStart.asrText);
+  if (!skipAsr) {
+    if (!(audioBlob instanceof Blob)) {
+      throw new Error("\u7f3a\u5c11\u53ef\u91cd\u8bd5\u7684\u5f55\u97f3\u6570\u636e\uff0c\u8bf7\u91cd\u65b0\u5f55\u97f3");
+    }
 
-  const createResp = await callAsr("CreateRecTask", createPayload);
-  const taskId = createResp?.Response?.Data?.TaskId;
-  if (!taskId) {
-    throw new Error("ASR task id is missing");
+    updateRecord(recordId, { asrTaskId: "" });
+    const createPayload = {
+      SourceType: 1,
+      DataLen: audioBlob.size,
+      Data: await blobToBase64(audioBlob)
+    };
+
+    const createResp = await callAsr("CreateRecTask", createPayload);
+    const taskId = createResp?.Response?.Data?.TaskId;
+    if (!taskId) {
+      throw new Error("ASR task id is missing");
+    }
+    updateRecord(recordId, { asrTaskId: String(taskId) });
+
+    const finalResp = await pollAsrTask(taskId, recordId, generation);
+    asrText = extractText(finalResp?.Response?.Data || {});
+    if (!asrText) {
+      throw new Error("ASR returned empty text");
+    }
+    updateRecord(recordId, { asrText });
+    recordAudioBlobs.delete(recordId);
   }
-  updateRecord(recordId, { asrTaskId: String(taskId) });
 
-  const finalResp = await pollAsrTask(taskId, recordId, generation);
-  const asrText = extractText(finalResp?.Response?.Data || {});
   if (!asrText) {
-    throw new Error("ASR returned empty text");
+    throw new Error("ASR text is empty");
   }
-  updateRecord(recordId, { asrText });
 
   const current = resolveRecord(recordId);
   if (!current) {
@@ -633,6 +706,110 @@ async function runWorkflow({ recordId, generation, blob, locationPromise }) {
     error: ""
   });
   setStatus("\u4e00\u6761\u8bb0\u5f55\u5df2\u5206\u6790\u5b8c\u6210\u3002", "ok");
+}
+
+function startWorkflowForRecord(workflowInput) {
+  const { recordId } = workflowInput;
+  const workflowPromise = runWorkflow(workflowInput)
+    .catch((err) => {
+      if (!resolveRecord(recordId)) {
+        return;
+      }
+      updateRecord(recordId, {
+        status: "error",
+        error: normalizeErrorMessage(err),
+        location: resolveRecord(recordId)?.location || "\u672a\u77e5\u5730\u70b9"
+      });
+      setStatus(`\u4efb\u52a1\u5931\u8d25: ${normalizeErrorMessage(err)}`, "error");
+    })
+    .finally(() => {
+      workflows.delete(recordId);
+      retryingRecords.delete(recordId);
+      saveRecords();
+      renderList();
+    });
+
+  workflows.set(recordId, workflowPromise);
+}
+
+async function retryFailedRecord(recordId) {
+  const record = resolveRecord(recordId);
+  if (!record || record.status !== "error") {
+    return;
+  }
+  if (workflows.has(recordId)) {
+    setStatus("\u8be5\u6761\u8bb0\u5f55\u6b63\u5728\u5904\u7406\u4e2d\uff0c\u8bf7\u7a0d\u5019\u3002", "warn");
+    return;
+  }
+
+  const retryTarget = getRetryTarget(record);
+  if (!retryTarget) {
+    setStatus("\u8be5\u6761\u8bb0\u5f55\u6682\u65e0\u53ef\u91cd\u8bd5\u7684\u9636\u6bb5\u3002", "warn");
+    return;
+  }
+
+  retryingRecords.add(recordId);
+  if (retryTarget === "asr") {
+    const blob = recordAudioBlobs.get(recordId);
+    if (!(blob instanceof Blob)) {
+      retryingRecords.delete(recordId);
+      renderList();
+      setStatus(
+        "\u8be5\u6761\u8bb0\u5f55\u7f3a\u5c11\u672c\u6b21\u4f1a\u8bdd\u7684\u5f55\u97f3\u7f13\u5b58\uff0c\u65e0\u6cd5\u91cd\u8bd5ASR\uff0c\u8bf7\u91cd\u65b0\u5f55\u97f3\u3002",
+        "error"
+      );
+      return;
+    }
+
+    updateRecord(recordId, {
+      status: "processing",
+      error: "",
+      aiText: "",
+      asrTaskId: ""
+    });
+    setStatus("\u6b63\u5728\u91cd\u8bd5\u8bed\u97f3\u8f6c\u5199...", "warn");
+    startWorkflowForRecord({
+      recordId,
+      generation: listGeneration,
+      audioBlob: blob,
+      locationPromise: Promise.resolve(record.location || "\u672a\u77e5\u5730\u70b9"),
+      skipAsr: false
+    });
+    return;
+  }
+
+  updateRecord(recordId, {
+    status: "processing",
+    error: "",
+    aiText: ""
+  });
+  setStatus("\u6b63\u5728\u91cd\u8bd5AI\u5206\u6790...", "warn");
+  startWorkflowForRecord({
+    recordId,
+    generation: listGeneration,
+    skipAsr: true
+  });
+}
+
+function getRetryTarget(record) {
+  if (!record || record.status !== "error") {
+    return "";
+  }
+  if (toCleanText(record.asrText)) {
+    return "ai";
+  }
+  return "asr";
+}
+
+function getRetryButtonLabel(record) {
+  const target = getRetryTarget(record);
+  if (target === "ai") {
+    return "\u91cd\u8bd5AI\u5206\u6790";
+  }
+  if (target === "asr") {
+    return "\u91cd\u8bd5\u8bed\u97f3\u8f6c\u5199";
+  }
+  return "";
 }
 
 function resolveRecord(recordId) {
@@ -837,9 +1014,9 @@ async function getLocationLabel() {
     const acc = Math.round(pos.coords.accuracy || 0);
     const coordsLabel = `lat=${lat.toFixed(6)}, lng=${lng.toFixed(6)}${acc > 0 ? `, \u00b1${acc}m` : ""}`;
 
-    const adminLabel = await reverseLookupAdministrativeLabel(lat, lng);
-    if (adminLabel) {
-      return `${adminLabel} (${coordsLabel})`;
+    const roadLabel = await reverseLookupRoadLabel(lat, lng);
+    if (roadLabel) {
+      return `${roadLabel} (${coordsLabel})`;
     }
     return coordsLabel;
   } catch {
@@ -853,48 +1030,19 @@ function getCurrentPosition(options) {
   });
 }
 
-async function reverseLookupAdministrativeLabel(lat, lng) {
-  const primary = await reverseWithBigDataCloud(lat, lng);
+async function reverseLookupRoadLabel(lat, lng) {
+  const primary = await reverseWithNominatimRoad(lat, lng);
   if (primary) {
     return primary;
   }
-  const fallback = await reverseWithNominatim(lat, lng);
+  const fallback = await reverseWithBigDataCloudRoad(lat, lng);
   if (fallback) {
     return fallback;
   }
   return "";
 }
 
-async function reverseWithBigDataCloud(lat, lng) {
-  const url = new URL("https://api.bigdatacloud.net/data/reverse-geocode-client");
-  url.searchParams.set("latitude", String(lat));
-  url.searchParams.set("longitude", String(lng));
-  url.searchParams.set("localityLanguage", "zh");
-
-  const data = await fetchJsonWithTimeout(url.toString(), GEO_LOOKUP_TIMEOUT_MS);
-  if (!data || typeof data !== "object") {
-    return "";
-  }
-
-  const adminList = Array.isArray(data?.localityInfo?.administrative) ? data.localityInfo.administrative : [];
-  const city = firstNonEmpty(
-    toCleanText(data.city),
-    toCleanText(data.locality),
-    pickAdminNameByKeyword(adminList, ["city", "municipality", "prefecture"])
-  );
-  const district = firstNonEmpty(
-    toCleanText(data.locality),
-    pickAdminNameByKeyword(adminList, ["district", "county", "borough", "suburb"])
-  );
-  const province = firstNonEmpty(
-    toCleanText(data.principalSubdivision),
-    pickAdminNameByKeyword(adminList, ["province", "state", "region"])
-  );
-
-  return composeAdministrativeLabel({ province, city, district });
-}
-
-async function reverseWithNominatim(lat, lng) {
+async function reverseWithNominatimRoad(lat, lng) {
   const url = new URL("https://nominatim.openstreetmap.org/reverse");
   url.searchParams.set("format", "jsonv2");
   url.searchParams.set("lat", String(lat));
@@ -911,26 +1059,48 @@ async function reverseWithNominatim(lat, lng) {
   }
 
   const addr = data.address && typeof data.address === "object" ? data.address : {};
-  const city = firstNonEmpty(
-    toCleanText(addr.city),
-    toCleanText(addr.town),
-    toCleanText(addr.municipality),
-    toCleanText(addr.village)
-  );
-  const district = firstNonEmpty(
-    toCleanText(addr.city_district),
-    toCleanText(addr.county),
-    toCleanText(addr.suburb),
-    toCleanText(addr.township),
-    toCleanText(addr.quarter)
-  );
-  const province = firstNonEmpty(
-    toCleanText(addr.state),
-    toCleanText(addr.province),
-    toCleanText(addr.region)
-  );
+  const candidates = [
+    addr.road,
+    addr.pedestrian,
+    addr.residential,
+    addr.bridge,
+    addr.highway,
+    addr.footway,
+    addr.cycleway,
+    addr.path,
+    data.name
+  ];
+  const strictRoad = pickRoadCandidate(candidates);
+  if (strictRoad) {
+    return strictRoad;
+  }
 
-  return composeAdministrativeLabel({ province, city, district });
+  const displayParts = String(data.display_name || "")
+    .split(",")
+    .map((part) => toCleanText(part));
+  const looseRoad = pickRoadCandidate(displayParts);
+  if (looseRoad) {
+    return looseRoad;
+  }
+  return "";
+}
+
+async function reverseWithBigDataCloudRoad(lat, lng) {
+  const url = new URL("https://api.bigdatacloud.net/data/reverse-geocode-client");
+  url.searchParams.set("latitude", String(lat));
+  url.searchParams.set("longitude", String(lng));
+  url.searchParams.set("localityLanguage", "zh");
+
+  const data = await fetchJsonWithTimeout(url.toString(), GEO_LOOKUP_TIMEOUT_MS);
+  if (!data || typeof data !== "object") {
+    return "";
+  }
+
+  const informativeList = Array.isArray(data?.localityInfo?.informative)
+    ? data.localityInfo.informative
+    : [];
+  const informativeNames = informativeList.map((item) => firstNonEmpty(item?.name, item?.description));
+  return pickRoadCandidate(informativeNames);
 }
 
 async function fetchJsonWithTimeout(url, timeoutMs, headers = {}) {
@@ -953,62 +1123,50 @@ async function fetchJsonWithTimeout(url, timeoutMs, headers = {}) {
   }
 }
 
-function pickAdminNameByKeyword(adminList, keywords) {
-  if (!Array.isArray(adminList) || !adminList.length) {
+function pickRoadCandidate(candidates) {
+  if (!Array.isArray(candidates)) {
     return "";
   }
-  for (const item of adminList) {
-    const name = toCleanText(item?.name);
+  const seen = new Set();
+  for (const value of candidates) {
+    const name = toCleanText(value);
     if (!name) {
       continue;
     }
-    const desc = toCleanText(item?.description).toLowerCase();
-    const haystack = `${name.toLowerCase()} ${desc}`;
-    if (keywords.some((keyword) => haystack.includes(keyword.toLowerCase()))) {
+    const normalized = name.toLowerCase().replace(/\s+/g, "");
+    if (seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+
+    if (looksLikePublicRoadName(name)) {
       return name;
     }
   }
   return "";
 }
 
-function composeAdministrativeLabel({ province, city, district }) {
-  const focusParts = [];
-  pushUniqueLocationPart(focusParts, city);
-  pushUniqueLocationPart(focusParts, district);
-  pushUniqueLocationPart(focusParts, province);
-  return focusParts.join(" ");
-}
-
-function pushUniqueLocationPart(target, value) {
-  const text = toCleanText(value);
+function looksLikePublicRoadName(name) {
+  const text = toCleanText(name);
   if (!text) {
-    return;
+    return false;
   }
-
-  const normalized = normalizeLocationPart(text);
-  if (!normalized) {
-    return;
+  if (looksLikeAdministrativeDivision(text)) {
+    return false;
   }
-
-  for (const current of target) {
-    const currentNorm = normalizeLocationPart(current);
-    if (!currentNorm) {
-      continue;
-    }
-    if (
-      currentNorm === normalized ||
-      currentNorm.includes(normalized) ||
-      normalized.includes(currentNorm)
-    ) {
-      return;
-    }
-  }
-
-  target.push(text);
+  return /(\u8def|\u8857|\u5927\u9053|\u5927\u8857|\u516c\u8def|\u9ad8\u901f|\u5feb\u901f\u8def|\u7acb\u4ea4|\u9ad8\u67b6|\u6865|\u5df7|\u9053|\u73af\u8def|\u80e1\u540c|\u5f04|Lane|Road|Street|Avenue|Boulevard|Bridge|Highway|Expressway|Freeway)$/i.test(
+    text
+  );
 }
 
-function normalizeLocationPart(value) {
-  return toCleanText(value).toLowerCase().replaceAll(" ", "");
+function looksLikeAdministrativeDivision(name) {
+  const text = toCleanText(name);
+  if (!text) {
+    return false;
+  }
+  return /(\u8857\u9053|\u793e\u533a|\u884c\u653f\u6751|\u6751\u59d4\u4f1a|\u5c45\u59d4\u4f1a|\u4e61|\u9547|\u533a|\u53bf|\u5e02|\u7701|\u65b0\u533a|\u5f00\u53d1\u533a)$/i.test(
+    text
+  );
 }
 
 function toCleanText(value) {
@@ -1026,7 +1184,8 @@ function renderList() {
 
   for (const item of records) {
     const li = document.createElement("li");
-    li.className = "item";
+    const isRetrying = retryingRecords.has(item.id);
+    li.className = `item${isRetrying ? " retrying" : ""}`;
 
     const badgeClass = item.status === "done" ? "done" : item.status === "error" ? "error" : "processing";
     const badgeText =
@@ -1035,6 +1194,9 @@ function renderList() {
         : item.status === "error"
         ? "\u5931\u8d25"
         : "\u5904\u7406\u4e2d";
+    const retryLabel = getRetryButtonLabel(item);
+    const canRetry = item.status === "error" && Boolean(retryLabel);
+    const retryDisabled = workflows.has(item.id);
 
     li.innerHTML = `
       <div class="item-head">
@@ -1059,6 +1221,13 @@ function renderList() {
           ? `<div class="block"><div class="label">\u9519\u8bef</div><div class="text">${escapeHtml(item.error)}</div></div>`
           : ""
       }
+      ${
+        canRetry
+          ? `<div class="item-actions"><button class="btn small retry-btn" type="button" data-action="retry" data-record-id="${escapeHtml(item.id)}" ${
+              retryDisabled ? "disabled" : ""
+            }>${escapeHtml(retryLabel)}</button></div>`
+          : ""
+      }
     `;
     refs.recordList.appendChild(li);
   }
@@ -1069,16 +1238,65 @@ function onExportTxt() {
     setStatus("\u6682\u65e0\u53ef\u5bfc\u51fa\u5185\u5bb9\u3002", "warn");
     return;
   }
+  openExportModal();
+}
 
-  const lines = records.map((item) =>
-    String(item.aiText || "")
-      .replace(/\r\n/g, "\n")
-      .replace(/\n+/g, " ")
-      .replace(/\s+/g, " ")
-      .trim()
-  );
+function openExportModal() {
+  if (!refs.exportModal || !refs.exportForm) {
+    return;
+  }
+  previousFocusedElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  refs.exportForm.reset();
+  if (refs.exportStartTime) {
+    refs.exportStartTime.value = pickDefaultExportStartTime();
+  }
+  refs.exportModal.removeAttribute("hidden");
+  refs.exportCancelBtn?.focus();
+}
 
-  const text = lines.join("\n");
+function closeExportModal() {
+  if (!refs.exportModal || refs.exportModal.hasAttribute("hidden")) {
+    return;
+  }
+  refs.exportModal.setAttribute("hidden", "");
+  if (previousFocusedElement && typeof previousFocusedElement.focus === "function") {
+    previousFocusedElement.focus();
+  }
+  previousFocusedElement = null;
+}
+
+function onExportFormSubmit(event) {
+  event.preventDefault();
+  if (!records.length) {
+    closeExportModal();
+    setStatus("\u6682\u65e0\u53ef\u5bfc\u51fa\u5185\u5bb9\u3002", "warn");
+    return;
+  }
+
+  const formData = new FormData(refs.exportForm);
+  const weather = toCleanText(String(formData.get("weather") || "")) || "\u672a\u586b\u5199";
+  const rawStartTime = toCleanText(String(formData.get("startTime") || ""));
+  if (!/^\d{2}:\d{2}$/.test(rawStartTime)) {
+    setStatus("\u8bf7\u9009\u62e9\u8bb0\u5f55\u5f00\u59cb\u65f6\u95f4\u3002", "error");
+    refs.exportStartTime?.focus();
+    return;
+  }
+
+  const exportMode = formData.get("exportMode") === "full" ? "full" : "ai_only";
+  const headerLine = buildExportHeaderLine(rawStartTime, weather);
+  const bodyText =
+    exportMode === "full" ? buildFullExportBody() : buildAiOnlyExportBody();
+  if (!bodyText) {
+    setStatus(
+      exportMode === "full"
+        ? "\u6682\u65e0\u53ef\u5bfc\u51fa\u7684\u5168\u91cf\u8bb0\u5f55\u3002"
+        : "\u6682\u65e0\u53ef\u5bfc\u51fa\u7684 AI \u5206\u6790\u5185\u5bb9\u3002",
+      "warn"
+    );
+    return;
+  }
+
+  const text = `${headerLine}\n\n${bodyText}`;
   const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -1088,7 +1306,84 @@ function onExportTxt() {
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
-  setStatus("\u5df2\u5bfc\u51fa AI \u7ed3\u679c TXT\u3002", "ok");
+  closeExportModal();
+  setStatus(
+    exportMode === "full"
+      ? "\u5df2\u5bfc\u51fa\u5168\u91cf\u8bb0\u5f55 TXT\uff08\u542bASR\u8f6c\u5199\uff09\u3002"
+      : "\u5df2\u5bfc\u51fa AI \u7ed3\u679c TXT\u3002",
+    "ok"
+  );
+}
+
+function pickDefaultExportStartTime() {
+  let earliest = null;
+  for (const item of records) {
+    const timeValue = Date.parse(String(item.createdAtIso || ""));
+    if (!Number.isFinite(timeValue)) {
+      continue;
+    }
+    if (earliest === null || timeValue < earliest) {
+      earliest = timeValue;
+    }
+  }
+  const base = earliest === null ? new Date() : new Date(earliest);
+  return `${String(base.getHours()).padStart(2, "0")}:${String(base.getMinutes()).padStart(2, "0")}`;
+}
+
+function buildExportHeaderLine(startTime, weather) {
+  const dayNight = inferDayNightByTime(startTime);
+  return `\u8bb0\u5f55\u5f00\u59cb\u65f6\u95f4\uff1a${startTime}\uff1b\u65f6\u6bb5\uff1a${dayNight}\uff1b\u5929\u6c14\uff1a${weather}`;
+}
+
+function inferDayNightByTime(timeText) {
+  const parts = String(timeText || "").split(":");
+  const hour = Number(parts[0]);
+  if (!Number.isFinite(hour)) {
+    return "\u767d\u5929";
+  }
+  return hour >= 6 && hour < 18 ? "\u767d\u5929" : "\u591c\u665a";
+}
+
+function buildAiOnlyExportBody() {
+  const lines = records
+    .map((item) =>
+      String(item.aiText || "")
+        .replace(/\r\n/g, "\n")
+        .replace(/\n+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+    )
+    .filter((line) => Boolean(line));
+  return lines.join("\n");
+}
+
+function buildFullExportBody() {
+  if (!records.length) {
+    return "";
+  }
+
+  const blocks = records.map((item, index) => {
+    const statusLabel =
+      item.status === "done"
+        ? "\u5b8c\u6210"
+        : item.status === "error"
+        ? "\u5931\u8d25"
+        : "\u5904\u7406\u4e2d";
+    const asrText = String(item.asrText || "").replace(/\r\n/g, "\n").trim() || "(\u7a7a)";
+    const aiText = String(item.aiText || "").replace(/\r\n/g, "\n").trim() || "(\u7a7a)";
+    const lines = [
+      `[${index + 1}] \u65f6\u95f4\uff1a${String(item.createdAtLabel || "").trim()}`,
+      `\u5730\u70b9\uff1a${String(item.location || "").trim()}`,
+      `\u72b6\u6001\uff1a${statusLabel}`,
+      `ASR\uff1a\n${asrText}`,
+      `AI\uff1a\n${aiText}`
+    ];
+    if (toCleanText(item.error)) {
+      lines.push(`\u9519\u8bef\uff1a${String(item.error).trim()}`);
+    }
+    return lines.join("\n");
+  });
+  return blocks.join("\n\n--------------------\n\n");
 }
 
 function onClearAll() {
@@ -1110,9 +1405,13 @@ function onClearAll() {
   }
 
   listGeneration += 1;
+  workflows.clear();
+  retryingRecords.clear();
+  recordAudioBlobs.clear();
   records = [];
   saveRecords();
   renderList();
+  closeExportModal();
   setStatus("\u5217\u8868\u5df2\u6e05\u7a7a\u3002", "ok");
 }
 
@@ -1312,3 +1611,4 @@ function dateStamp(date) {
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+

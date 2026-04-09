@@ -43,7 +43,7 @@
           <button id="recordBtn" class="record-btn" type="button">
             &#25353;&#20303;&#24405;&#38899;
           </button>
-          <div class="hint" id="recordHint">松手即为停止，如无响应，可再轻点一下以停止录制。</div>
+          <div class="hint" id="recordHint">&#26494;&#25163;&#21363;&#20026;&#20572;&#27490;&#65292;&#22914;&#26080;&#21709;&#24212;&#65292;&#21487;&#20877;&#36731;&#28857;&#19968;&#19979;&#20197;&#20572;&#27490;&#24405;&#21046;&#12290;</div>
         </div>
       </div>
 
@@ -63,6 +63,51 @@
       </div>
     </section>
   </main>
+
+  <div id="exportModal" class="modal-backdrop" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="exportDialogTitle">
+      <h3 id="exportDialogTitle">&#23548;&#20986;&#37197;&#32622;</h3>
+      <form id="exportForm" class="modal-form">
+        <label for="exportWeather">&#24403;&#22825;&#22825;&#27668;</label>
+        <select id="exportWeather" name="weather" required>
+          <option value="&#26228;&#22825;">&#26228;&#22825;</option>
+          <option value="&#38452;&#22825;">&#38452;&#22825;</option>
+          <option value="&#22810;&#20113;">&#22810;&#20113;</option>
+          <option value="&#23567;&#38632;">&#23567;&#38632;</option>
+          <option value="&#20013;&#38632;">&#20013;&#38632;</option>
+          <option value="&#22823;&#38632;">&#22823;&#38632;</option>
+          <option value="&#26292;&#38632;">&#26292;&#38632;</option>
+          <option value="&#38632;&#22841;&#38634;">&#38632;&#22841;&#38634;</option>
+          <option value="&#23567;&#38634;">&#23567;&#38634;</option>
+          <option value="&#20013;&#38634;">&#20013;&#38634;</option>
+          <option value="&#22823;&#38634;">&#22823;&#38634;</option>
+          <option value="&#38654;">&#38654;</option>
+          <option value="&#38718;">&#38718;</option>
+          <option value="&#27801;&#23576;">&#27801;&#23576;</option>
+        </select>
+
+        <label for="exportStartTime">&#35760;&#24405;&#24320;&#22987;&#26102;&#38388;</label>
+        <input id="exportStartTime" name="startTime" type="time" step="60" required>
+
+        <fieldset class="mode-fieldset">
+          <legend>&#23548;&#20986;&#27169;&#24335;</legend>
+          <label class="radio-line">
+            <input type="radio" name="exportMode" value="ai_only" checked>
+            <span>&#20165;AI&#20998;&#26512;&#35760;&#24405;&#23548;&#20986;</span>
+          </label>
+          <label class="radio-line">
+            <input type="radio" name="exportMode" value="full">
+            <span>&#20840;&#37327;&#35760;&#24405;&#23548;&#20986;&#65288;&#21547;ASR&#36716;&#20889;&#65289;</span>
+          </label>
+        </fieldset>
+
+        <div class="modal-actions">
+          <button id="exportCancelBtn" class="btn ghost" type="button">&#21462;&#28040;</button>
+          <button id="exportConfirmBtn" class="btn primary" type="submit">&#30830;&#35748;&#23548;&#20986;</button>
+        </div>
+      </form>
+    </div>
+  </div>
 
   <script src="index.js"></script>
 </body>

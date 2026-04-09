@@ -237,6 +237,17 @@ h1 {
   cursor: pointer;
 }
 
+.btn.small {
+  padding: 6px 10px;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.btn:disabled {
+  opacity: 0.56;
+  cursor: not-allowed;
+}
+
 .btn.primary {
   background: linear-gradient(135deg, #2f76ff 0%, #0b9fff 100%);
   color: #fff;
@@ -274,6 +285,11 @@ h1 {
   border-radius: 12px;
   padding: 12px;
   background: #fff;
+}
+
+.item.retrying {
+  border-color: #bfd4f8;
+  box-shadow: 0 0 0 2px rgba(47, 118, 255, 0.1);
 }
 
 .item-head {
@@ -334,6 +350,110 @@ h1 {
   font-size: 0.92rem;
 }
 
+.item-actions {
+  margin-top: 8px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.retry-btn {
+  background: #edf3ff;
+  color: #2e4d88;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(20, 32, 56, 0.42);
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+
+.modal-backdrop[hidden] {
+  display: none !important;
+}
+
+.modal-card {
+  width: min(520px, 100%);
+  min-width: 0;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  padding: 16px;
+  overflow-x: hidden;
+}
+
+.modal-card h3 {
+  margin: 0 0 12px;
+  font-size: 1.08rem;
+}
+
+.modal-form {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.modal-form label {
+  font-size: 0.9rem;
+  color: #3a4f73;
+}
+
+.modal-form select,
+.modal-form input[type="time"] {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  border: 1px solid #c9d8ef;
+  border-radius: 10px;
+  padding: 9px 10px;
+  font-size: 0.9rem;
+  outline: none;
+}
+
+.modal-form select:focus,
+.modal-form input[type="time"]:focus {
+  border-color: #6fa0ff;
+  box-shadow: 0 0 0 3px rgba(48, 110, 229, 0.14);
+}
+
+.mode-fieldset {
+  margin: 2px 0 0;
+  padding: 10px;
+  border: 1px solid #d9e3f2;
+  border-radius: 10px;
+  min-width: 0;
+}
+
+.mode-fieldset legend {
+  padding: 0 4px;
+  color: #4e638a;
+  font-size: 0.86rem;
+}
+
+.radio-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  color: #2f466d;
+  font-size: 0.9rem;
+}
+
+.radio-line:first-of-type {
+  margin-top: 0;
+}
+
+.modal-actions {
+  margin-top: 6px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
@@ -357,5 +477,18 @@ h1 {
 
   .toolbar .btn {
     flex: 1;
+  }
+
+  .modal-actions {
+    justify-content: stretch;
+  }
+
+  .modal-actions .btn {
+    flex: 1;
+  }
+
+  .modal-card {
+    width: 100%;
+    max-width: 100%;
   }
 }
