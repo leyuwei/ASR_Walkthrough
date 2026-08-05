@@ -19,9 +19,9 @@ const DEFAULT_CONFIG = {
   pollTimeoutSec: "600",
   voiceUrl: "",
   taskId: "",
-  aiRelayEndpoint: "",
+  aiRelayEndpoint: "https://open.bigmodel.cn/api/coding/paas/v4",
   aiApiKey: "",
-  aiModel: "codex-mini-latest",
+  aiModel: "glm-5.2",
   aiPromptTemplate:
     "You are an ASR post-processing assistant. Keep the original meaning, fix obvious typos, add punctuation, and format with clear paragraphs.\n\nOriginal text:\n{{text}}",
   aiAutoPostProcess: false
@@ -322,14 +322,14 @@ function buildPhpApiEndpointCandidates(route) {
   return candidates;
 }
 
-async function requestPhpApi(route, { method = "GET", payload = undefined } = {}) {
+async function requestPhpApi(route, { method = "GET", payload = undefined, timeoutMs = 30000 } = {}) {
   const endpoints = buildPhpApiEndpointCandidates(route);
   let lastTypeError = null;
   let lastNotFound = null;
 
   for (const endpoint of endpoints) {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const headers = { "Content-Type": CONTENT_TYPE };
       if (route === "config") {
@@ -910,13 +910,14 @@ async function runAiPostProcess({ sourceText = "", silentStatus = false } = {}) 
   refs.runAiBtn.disabled = true;
 
   if (!silentStatus) {
-    setStatus("Calling CODEX API for post-processing...");
+    setStatus("Calling AI model for post-processing...");
   }
 
   try {
     const { response, text, json } = await requestPhpApi("ai", {
       method: "POST",
-      payload: requestBody
+      payload: requestBody,
+      timeoutMs: 120000
     });
     if (!response.ok) {
       const message = json?.message || text || "AI request failed";

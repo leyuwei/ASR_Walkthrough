@@ -881,7 +881,8 @@ async function callAi({ asrText, dateTime, location }) {
   };
   const { response, text, json } = await requestPhpApi("ai", {
     method: "POST",
-    payload: body
+    payload: body,
+    timeoutMs: 120000
   });
   if (!response.ok) {
     throw new Error(`AI HTTP ${response.status}: ${json?.message || text || "request failed"}`);
@@ -889,10 +890,10 @@ async function callAi({ asrText, dateTime, location }) {
   return json;
 }
 
-async function requestPhpApi(route, { method = "GET", payload = undefined } = {}) {
+async function requestPhpApi(route, { method = "GET", payload = undefined, timeoutMs = 30000 } = {}) {
   const endpoint = buildApiEndpoint(route);
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 30000);
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const options = {
       method,
@@ -1301,7 +1302,7 @@ function onExportFormSubmit(event) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `liubao_walkthrough_${dateStamp(new Date())}.txt`;
+  a.download = `zhengliubao_walkthrough_${dateStamp(new Date())}.txt`;
   document.body.appendChild(a);
   a.click();
   a.remove();

@@ -5,7 +5,7 @@ const API_VERSION = '2019-06-14';
 const API_SERVICE = 'asr';
 const CONTENT_TYPE = 'application/json; charset=utf-8';
 const AI_DEFAULT_CHAT_PATH = '/v1/chat/completions';
-const APP_AUTH_COOKIE = 'liubao_auth';
+const APP_AUTH_COOKIE = 'zhengliubao_auth';
 const APP_AUTH_COOKIE_TTL_SEC = 2592000; // 30 days
 const APP_AUTH_CODE_HASH = '46aa55a4077980a09d338e85986dd05f95f0f475719c441b870556a309734789';
 
@@ -23,9 +23,9 @@ const DEFAULT_CONFIG = [
     'pollTimeoutSec' => '600',
     'voiceUrl' => '',
     'taskId' => '',
-    'aiRelayEndpoint' => '',
+    'aiRelayEndpoint' => 'https://open.bigmodel.cn/api/coding/paas/v4',
     'aiApiKey' => '',
-    'aiModel' => 'codex-mini-latest',
+    'aiModel' => 'glm-5.2',
     'aiPromptTemplate' => "You are an ASR post-processing assistant. Keep the original meaning, fix obvious typos, add punctuation, and format with clear paragraphs.\n\nOriginal text:\n{{text}}",
     'aiAutoPostProcess' => false,
 ];
@@ -417,6 +417,11 @@ function handle_ai_route(): void
 {
     require_app_session();
 
+    // GLM 等大模型单次响应可能需要数十秒，放宽 PHP 最大执行时间，避免在 curl 90s 完成前被杀。
+    if (function_exists('set_time_limit')) {
+        @set_time_limit(150);
+    }
+
     if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
         send_json(405, ['message' => 'Method Not Allowed']);
         return;
@@ -497,11 +502,28 @@ function handle_ai_route(): void
 
     $decoded = json_decode($response['body'], true);
     if (!is_array($decoded)) {
-        send_json($response['status'], ['raw' => $response['body']]);
+        // 上游返回非 JSON，统一用 502 转发，避免和应用自身 401 会话过期混淆。
+        send_json(502, [
+            'message' => 'AI upstream returned a non-JSON response (HTTP ' . $response['status'] . ')',
+            'raw' => $response['body'],
+        ]);
         return;
     }
 
-    send_json($response['status'], [
+    if ($response['status'] >= 400) {
+        // 上游 HTTP 错误一律映射为 502 Bad Gateway，
+        // 不能透传上游状态码（尤其是 401/403），否则前端会误判为「应用会话过期」并踢出登录。
+        $upstreamMessage = extract_upstream_error_message($decoded);
+        $detail = $upstreamMessage !== '' ? $upstreamMessage : 'AI upstream returned an error';
+        send_json(502, [
+            'message' => $detail . ' (upstream HTTP ' . $response['status'] . ')',
+            'text' => '',
+            'response' => $decoded,
+        ]);
+        return;
+    }
+
+    send_json(200, [
         'text' => extract_ai_text($decoded),
         'response' => $decoded,
     ]);
@@ -655,8 +677,13 @@ function normalize_ai_chat_endpoint(string $endpoint): ?array
 
     $path = (string)($parsed['path'] ?? '');
     if ($path === '' || $path === '/') {
+        // Bare host (no version path): assume OpenAI-style /v1 base.
         $path = AI_DEFAULT_CHAT_PATH;
-    } elseif (preg_match('#/v1/?$#i', $path) === 1) {
+    } elseif (preg_match('#/v\d+/?$#i', $path) === 1) {
+        // Versioned base such as /v1 (OpenAI/relay) or /api/paas/v4 (Zhipu BigModel).
+        $path = rtrim($path, '/') . '/chat/completions';
+    } elseif (!preg_match('#chat/completions/?$#i', $path)) {
+        // Any other base path without an explicit chat endpoint.
         $path = rtrim($path, '/') . '/chat/completions';
     }
 
@@ -740,6 +767,25 @@ function extract_ai_text(array $payload): string
         }
     }
 
+    return '';
+}
+
+function extract_upstream_error_message(array $payload): string
+{
+    $error = $payload['error'] ?? null;
+    if (is_string($error) && trim($error) !== '') {
+        return trim($error);
+    }
+    if (is_array($error)) {
+        $message = $error['message'] ?? null;
+        if (is_string($message) && trim($message) !== '') {
+            return trim($message);
+        }
+    }
+    $message = $payload['message'] ?? null;
+    if (is_string($message) && trim($message) !== '') {
+        return trim($message);
+    }
     return '';
 }
 
