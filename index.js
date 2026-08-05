@@ -23,6 +23,7 @@ const refs = {
   authSubmitBtn: document.getElementById("authSubmitBtn"),
   authMessage: document.getElementById("authMessage"),
   logoutBtn: document.getElementById("logoutBtn"),
+  quickEntry: document.getElementById("quickEntry"),
   exportModal: document.getElementById("exportModal"),
   exportForm: document.getElementById("exportForm"),
   exportWeather: document.getElementById("exportWeather"),
@@ -50,6 +51,7 @@ let pendingStopAfterStart = false;
 let isFinalizingRecording = false;
 let recordingSafetyTimerId = null;
 let pendingRecordContext = null;
+let supplementTargetId = null;
 let appInitialized = false;
 let isAuthSubmitting = false;
 let previousFocusedElement = null;
@@ -225,6 +227,10 @@ function bindEvents() {
   refs.exportBtn.addEventListener("click", onExportTxt);
   refs.clearBtn.addEventListener("click", onClearAll);
   refs.recordList.addEventListener("click", onRecordListClick);
+
+  if (refs.quickEntry) {
+    refs.quickEntry.addEventListener("click", onQuickEntryClick);
+  }
 
   if (refs.exportForm) {
     refs.exportForm.addEventListener("submit", onExportFormSubmit);
@@ -423,16 +429,112 @@ function onRecordListClick(event) {
     return;
   }
 
-  const retryBtn = target.closest("[data-action='retry']");
-  if (!retryBtn) {
+  const actionBtn = target.closest("[data-action]");
+  if (!actionBtn) {
     return;
   }
 
-  const recordId = String(retryBtn.getAttribute("data-record-id") || "");
+  const action = actionBtn.getAttribute("data-action");
+  const recordId = String(actionBtn.getAttribute("data-record-id") || "");
   if (!recordId) {
     return;
   }
-  void retryFailedRecord(recordId);
+
+  if (action === "retry") {
+    void retryFailedRecord(recordId);
+    return;
+  }
+  if (action === "supplement") {
+    void beginSupplementRecording(recordId);
+    return;
+  }
+  if (action === "stop-supplement") {
+    void requestStopRecording("supplement_stop");
+  }
+}
+
+const QUICK_CATEGORIES = ["安全", "效率", "交规", "导航", "异常"];
+
+function onQuickEntryClick(event) {
+  const target = event.target instanceof Element ? event.target : null;
+  if (!target) {
+    return;
+  }
+  const btn = target.closest("[data-category]");
+  if (!btn) {
+    return;
+  }
+  addQuickRecord(String(btn.getAttribute("data-category") || ""));
+}
+
+function addQuickRecord(category) {
+  if (!QUICK_CATEGORIES.includes(category)) {
+    return;
+  }
+  if (isRecording || isStartingRecording || isFinalizingRecording) {
+    setStatus("\u5f55\u97f3\u4e2d\u65e0\u6cd5\u65b0\u5efa\u5feb\u901f\u8bb0\u5f55\uff0c\u8bf7\u5148\u7ed3\u675f\u5f55\u97f3\u3002", "warn");
+    return;
+  }
+
+  const createdAt = new Date();
+  const id = createRecordId(createdAt);
+  const record = {
+    id,
+    createdAtIso: createdAt.toISOString(),
+    createdAtLabel: formatDateTime(createdAt),
+    location: "\u5b9a\u4f4d\u4e2d...",
+    category,
+    source: "quick",
+    asrText: "",
+    aiText: "",
+    status: "draft",
+    error: "",
+    asrTaskId: ""
+  };
+
+  records.unshift(record);
+  saveRecords();
+  renderList();
+  setStatus(`\u5df2\u6dfb\u52a0\u201c${category}\u201d\u5feb\u901f\u8bb0\u5f55\uff08\u6682\u5b58\uff09\uff0c\u53ef\u70b9\u51fb\u201c\u8865\u5f55\u95ee\u9898\u63cf\u8ff0\u201d\u8865\u5145\u8bed\u97f3\u63cf\u8ff0\u3002`, "ok");
+
+  getLocationLabel().then((location) => {
+    if (toCleanText(location)) {
+      updateRecord(id, { location });
+    }
+  });
+}
+
+async function beginSupplementRecording(recordId) {
+  if (isRecording || isStartingRecording || isFinalizingRecording) {
+    setStatus("\u5f53\u524d\u5df2\u6709\u5f55\u97f3\u4efb\u52a1\u8fdb\u884c\u4e2d\u3002", "warn");
+    return;
+  }
+  const record = resolveRecord(recordId);
+  if (!record || record.status !== "draft") {
+    return;
+  }
+
+  supplementTargetId = recordId;
+  isStartingRecording = true;
+  try {
+    await startRecording();
+  } catch (err) {
+    setStatus(`\u5f00\u59cb\u8865\u5f55\u5931\u8d25: ${normalizeErrorMessage(err)}`, "error");
+    supplementTargetId = null;
+    resetRecordButtonUi();
+    return;
+  } finally {
+    isStartingRecording = false;
+  }
+
+  if (!isRecording) {
+    supplementTargetId = null;
+    resetRecordButtonUi();
+    return;
+  }
+
+  setStatus(`\u6b63\u5728\u8865\u5f55\u201c${record.category}\u201d\u95ee\u9898\u63cf\u8ff0\uff0c\u70b9\u51fb\u201c\u505c\u6b62\u8865\u5f55\u201d\u6216\u8f7b\u70b9\u7ed3\u675f\u3002`, "warn");
+  renderList();
 }
 
 function isExportModalOpen() {
@@ -520,6 +622,9 @@ async function finalizeRecording() {
     stopRecordingSafetyTimer();
     resetRecordButtonUi();
 
+    const supplementId = supplementTargetId;
+    supplementTargetId = null;
+
     if (!pcmChunks.length) {
       setStatus("\u672a\u91c7\u96c6\u5230\u97f3\u9891\u3002", "error");
       return;
@@ -528,6 +633,30 @@ async function finalizeRecording() {
     const blob = encodeWavBlob(pcmChunks, sampleRate);
     if (blob.size > RECORDING_DATA_LIMIT) {
       setStatus("\u97f3\u9891\u8d85\u8fc7 5MB\uff0c\u8bf7\u7f29\u77ed\u5f55\u97f3\u65f6\u957f\u3002", "error");
+      return;
+    }
+
+    if (supplementId) {
+      const draftRecord = resolveRecord(supplementId);
+      if (!draftRecord) {
+        setStatus("\u672a\u627e\u5230\u8981\u8865\u5f55\u7684\u8bb0\u5f55\u3002", "error");
+        return;
+      }
+      recordAudioBlobs.set(supplementId, blob);
+      updateRecord(supplementId, {
+        status: "processing",
+        error: "",
+        asrText: "",
+        aiText: "",
+        asrTaskId: ""
+      });
+      setStatus(`\u6b63\u5728\u5206\u6790\u201c${draftRecord.category || ""}\u201d\u8865\u5f55\u7684\u95ee\u9898\u63cf\u8ff0...`, "warn");
+      startWorkflowForRecord({
+        recordId: supplementId,
+        generation: listGeneration,
+        audioBlob: blob,
+        locationPromise: Promise.resolve(draftRecord.location || "\u672a\u77e5\u5730\u70b9")
+      });
       return;
     }
 
@@ -1186,23 +1315,51 @@ function renderList() {
   for (const item of records) {
     const li = document.createElement("li");
     const isRetrying = retryingRecords.has(item.id);
-    li.className = `item${isRetrying ? " retrying" : ""}`;
+    const isSupplementing = supplementTargetId === item.id;
+    li.className = `item${isRetrying ? " retrying" : ""}${isSupplementing ? " supplementing" : ""}`;
 
-    const badgeClass = item.status === "done" ? "done" : item.status === "error" ? "error" : "processing";
+    const badgeClass =
+      item.status === "done"
+        ? "done"
+        : item.status === "error"
+        ? "error"
+        : item.status === "draft"
+        ? "draft"
+        : "processing";
     const badgeText =
       item.status === "done"
         ? "\u5b8c\u6210"
         : item.status === "error"
         ? "\u5931\u8d25"
+        : item.status === "draft"
+        ? "\u6682\u5b58"
         : "\u5904\u7406\u4e2d";
     const retryLabel = getRetryButtonLabel(item);
     const canRetry = item.status === "error" && Boolean(retryLabel);
     const retryDisabled = workflows.has(item.id);
+    const busy = isRecording || isStartingRecording || isFinalizingRecording;
+
+    const chip = item.category
+      ? `<span class="chip ${categoryChipClass(item.category)}">${escapeHtml(item.category)}</span>`
+      : "";
+
+    let actionsHtml = "";
+    if (item.status === "draft") {
+      if (isSupplementing) {
+        actionsHtml = `<div class="item-actions"><button class="btn small supplement-btn" type="button" data-action="stop-supplement" data-record-id="${escapeHtml(item.id)}">\u505c\u6b62\u8865\u5f55</button></div>`;
+      } else {
+        actionsHtml = `<div class="item-actions"><button class="btn small supplement-btn" type="button" data-action="supplement" data-record-id="${escapeHtml(item.id)}"${busy ? " disabled" : ""}>\u8865\u5f55\u95ee\u9898\u63cf\u8ff0</button></div>`;
+      }
+    } else if (canRetry) {
+      actionsHtml = `<div class="item-actions"><button class="btn small retry-btn" type="button" data-action="retry" data-record-id="${escapeHtml(item.id)}" ${
+        retryDisabled ? "disabled" : ""
+      }>${escapeHtml(retryLabel)}</button></div>`;
+    }
 
     li.innerHTML = `
       <div class="item-head">
         <div class="meta">
-          <div>\u65f6\u95f4\uff1a${escapeHtml(item.createdAtLabel || "")}</div>
+          <div>\u65f6\u95f4\uff1a${escapeHtml(item.createdAtLabel || "")}${chip}</div>
           <div>\u5730\u70b9\uff1a${escapeHtml(item.location || "")}</div>
         </div>
         <div class="badge ${badgeClass}">${badgeText}</div>
@@ -1222,15 +1379,26 @@ function renderList() {
           ? `<div class="block"><div class="label">\u9519\u8bef</div><div class="text">${escapeHtml(item.error)}</div></div>`
           : ""
       }
-      ${
-        canRetry
-          ? `<div class="item-actions"><button class="btn small retry-btn" type="button" data-action="retry" data-record-id="${escapeHtml(item.id)}" ${
-              retryDisabled ? "disabled" : ""
-            }>${escapeHtml(retryLabel)}</button></div>`
-          : ""
-      }
+      ${actionsHtml}
     `;
     refs.recordList.appendChild(li);
+  }
+}
+
+function categoryChipClass(category) {
+  switch (category) {
+    case "\u5b89\u5168":
+      return "chip-cat-safety";
+    case "\u6548\u7387":
+      return "chip-cat-efficiency";
+    case "\u4ea4\u89c4":
+      return "chip-cat-traffic";
+    case "\u5bfc\u822a":
+      return "chip-cat-nav";
+    case "\u5f02\u5e38":
+      return "chip-cat-abnormal";
+    default:
+      return "";
   }
 }
 
@@ -1369,6 +1537,8 @@ function buildFullExportBody() {
         ? "\u5b8c\u6210"
         : item.status === "error"
         ? "\u5931\u8d25"
+        : item.status === "draft"
+        ? "\u6682\u5b58"
         : "\u5904\u7406\u4e2d";
     const asrText = String(item.asrText || "").replace(/\r\n/g, "\n").trim() || "(\u7a7a)";
     const aiText = String(item.aiText || "").replace(/\r\n/g, "\n").trim() || "(\u7a7a)";
@@ -1409,6 +1579,7 @@ function onClearAll() {
   workflows.clear();
   retryingRecords.clear();
   recordAudioBlobs.clear();
+  supplementTargetId = null;
   records = [];
   saveRecords();
   renderList();
@@ -1434,9 +1605,11 @@ function loadRecords() {
       createdAtIso: String(item.createdAtIso || new Date().toISOString()),
       createdAtLabel: String(item.createdAtLabel || formatDateTime(new Date())),
       location: String(item.location || "\u672a\u77e5\u5730\u70b9"),
+      category: String(item.category || ""),
+      source: String(item.source || "voice"),
       asrText: String(item.asrText || ""),
       aiText: String(item.aiText || ""),
-      status: ["processing", "done", "error"].includes(item.status) ? item.status : "done",
+      status: ["draft", "processing", "done", "error"].includes(item.status) ? item.status : "done",
       error: String(item.error || ""),
       asrTaskId: String(item.asrTaskId || "")
     }));

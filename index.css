@@ -190,6 +190,72 @@ h1 {
   font-size: 0.9rem;
 }
 
+.quick-entry {
+  margin: 20px 0 16px;
+  display: grid;
+  gap: 10px;
+}
+
+.quick-entry-title {
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.quick-entry-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.quick-btn {
+  border: none;
+  border-radius: 12px;
+  padding: 14px 4px;
+  color: #fff;
+  font-size: 0.92rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 6px 14px rgba(31, 53, 102, 0.16);
+  transition: transform 120ms ease, filter 120ms ease;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.quick-btn:hover {
+  filter: brightness(1.04);
+}
+
+.quick-btn:active {
+  transform: scale(0.96);
+}
+
+.quick-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.quick-safety {
+  background: linear-gradient(135deg, #ff6b6b 0%, #e03131 100%);
+}
+
+.quick-efficiency {
+  background: linear-gradient(135deg, #ffb020 0%, #f59f00 100%);
+}
+
+.quick-traffic {
+  background: linear-gradient(135deg, #4dabf7 0%, #2563eb 100%);
+}
+
+.quick-nav {
+  background: linear-gradient(135deg, #2dd4bf 0%, #0ca678 100%);
+}
+
+.quick-abnormal {
+  background: linear-gradient(135deg, #b685f2 0%, #8b5cf6 100%);
+}
+
 .status {
   width: min(720px, 100%);
   border-radius: 12px;
@@ -329,6 +395,52 @@ h1 {
   color: #c20f3a;
 }
 
+.badge.draft {
+  background: #eef1f6;
+  color: #5f6f8b;
+}
+
+.chip {
+  display: inline-block;
+  vertical-align: middle;
+  padding: 3px 9px;
+  margin-left: 4px;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: #fff;
+}
+
+.chip-cat-safety {
+  background: #e03131;
+}
+
+.chip-cat-efficiency {
+  background: #f59f00;
+}
+
+.chip-cat-traffic {
+  background: #2563eb;
+}
+
+.chip-cat-nav {
+  background: #0ca678;
+}
+
+.chip-cat-abnormal {
+  background: #8b5cf6;
+}
+
+.item.supplementing {
+  border-color: #bfd4f8;
+  box-shadow: 0 0 0 2px rgba(47, 118, 255, 0.16);
+}
+
+.supplement-btn {
+  background: linear-gradient(135deg, #2f76ff 0%, #0b9fff 100%);
+  color: #fff;
+}
+
 .block {
   background: #f8fbff;
   border: 1px solid #e5edfa;
@@ -393,6 +505,7 @@ h1 {
 
 .modal-form {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
   min-width: 0;
 }
