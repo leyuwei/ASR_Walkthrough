@@ -28,7 +28,14 @@ const refs = {
   exportForm: document.getElementById("exportForm"),
   exportWeather: document.getElementById("exportWeather"),
   exportStartTime: document.getElementById("exportStartTime"),
-  exportCancelBtn: document.getElementById("exportCancelBtn")
+  exportCancelBtn: document.getElementById("exportCancelBtn"),
+  editModal: document.getElementById("editModal"),
+  editForm: document.getElementById("editForm"),
+  editTime: document.getElementById("editTime"),
+  editLocation: document.getElementById("editLocation"),
+  editAsr: document.getElementById("editAsr"),
+  editAi: document.getElementById("editAi"),
+  editCancelBtn: document.getElementById("editCancelBtn")
 };
 
 const workflows = new Map();
@@ -52,6 +59,7 @@ let isFinalizingRecording = false;
 let recordingSafetyTimerId = null;
 let pendingRecordContext = null;
 let supplementTargetId = null;
+let editingRecordId = null;
 let appInitialized = false;
 let isAuthSubmitting = false;
 let previousFocusedElement = null;
@@ -181,6 +189,8 @@ function lockApp(message, type = "") {
   refs.authGate?.removeAttribute("hidden");
   refs.mainApp?.setAttribute("hidden", "");
   closeExportModal();
+  closeEditModal();
+  cleanupAudioGraph();
   setAuthMessage(message || "\u8bf7\u8f93\u5165\u6388\u6743\u7801\u4ee5\u7ee7\u7eed\u3002", type);
   if (refs.authCodeInput) {
     refs.authCodeInput.focus();
@@ -240,6 +250,16 @@ function bindEvents() {
   }
   if (refs.exportModal) {
     refs.exportModal.addEventListener("click", onExportBackdropClick);
+  }
+
+  if (refs.editForm) {
+    refs.editForm.addEventListener("submit", onEditFormSubmit);
+  }
+  if (refs.editCancelBtn) {
+    refs.editCancelBtn.addEventListener("click", closeEditModal);
+  }
+  if (refs.editModal) {
+    refs.editModal.addEventListener("click", onEditBackdropClick);
   }
 }
 
@@ -389,31 +409,41 @@ async function onWindowBlur() {
 }
 
 async function onWindowPageHide() {
-  if (!isRecording && !isStartingRecording) {
-    return;
+  if (isRecording || isStartingRecording) {
+    await requestStopRecording("page_hide");
   }
-  await requestStopRecording("page_hide");
+  cleanupAudioGraph();
 }
 
 async function onVisibilityChange() {
   if (document.visibilityState !== "hidden") {
     return;
   }
-  if (!isRecording && !isStartingRecording) {
-    return;
+  if (isRecording || isStartingRecording) {
+    await requestStopRecording("visibility_hidden");
   }
-  await requestStopRecording("visibility_hidden");
+  // Release the warm mic stream while in background to save battery;
+  // it will be re-acquired on the next press-to-record.
+  cleanupAudioGraph();
 }
 
 function onDocumentKeyDown(event) {
   if (event.key !== "Escape") {
     return;
   }
-  if (!isExportModalOpen()) {
+  if (isExportModalOpen()) {
+    event.preventDefault();
+    closeExportModal();
     return;
   }
-  event.preventDefault();
-  closeExportModal();
+  if (isEditModalOpen()) {
+    event.preventDefault();
+    closeEditModal();
+  }
+}
+
+function isEditModalOpen() {
+  return Boolean(refs.editModal && !refs.editModal.hasAttribute("hidden"));
 }
 
 function onExportBackdropClick(event) {
@@ -450,6 +480,18 @@ function onRecordListClick(event) {
   }
   if (action === "stop-supplement") {
     void requestStopRecording("supplement_stop");
+    return;
+  }
+  if (action === "edit") {
+    openEditModal(recordId);
+    return;
+  }
+  if (action === "export-single") {
+    exportSingleRecord(recordId);
+    return;
+  }
+  if (action === "delete") {
+    deleteRecord(recordId);
   }
 }
 
@@ -550,11 +592,21 @@ async function startRecording() {
 
   try {
     pcmChunks = [];
-    mediaStream = await navigator.mediaDevices.getUserMedia({
-      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true }
-    });
 
-    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    // Reuse the warm mic stream + AudioContext between recordings so iOS Safari
+    // does not re-prompt for microphone permission on every press-to-record.
+    if (!mediaStream || !mediaStream.getTracks().some((t) => t.readyState === "live")) {
+      if (mediaStream) {
+        mediaStream.getTracks().forEach((track) => track.stop());
+      }
+      mediaStream = await navigator.mediaDevices.getUserMedia({
+        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true }
+      });
+    }
+
+    if (!audioContext || audioContext.state === "closed") {
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    }
     await audioContext.resume();
     sourceNode = audioContext.createMediaStreamSource(mediaStream);
 
@@ -618,7 +670,7 @@ async function finalizeRecording() {
 
     isRecording = false;
     const sampleRate = audioContext ? audioContext.sampleRate : 16000;
-    cleanupAudioGraph();
+    releaseAudioNodes();
     stopRecordingSafetyTimer();
     resetRecordButtonUi();
 
@@ -1344,16 +1396,23 @@ function renderList() {
       : "";
 
     let actionsHtml = "";
+    const commonActions = `
+      <button class="btn small edit-btn" type="button" data-action="edit" data-record-id="${escapeHtml(item.id)}">\u7f16\u8f91</button>
+      <button class="btn small export-single-btn" type="button" data-action="export-single" data-record-id="${escapeHtml(item.id)}">\u5bfc\u51fa</button>
+      <button class="btn small delete-btn" type="button" data-action="delete" data-record-id="${escapeHtml(item.id)}">\u5220\u9664</button>
+    `;
     if (item.status === "draft") {
       if (isSupplementing) {
         actionsHtml = `<div class="item-actions"><button class="btn small supplement-btn" type="button" data-action="stop-supplement" data-record-id="${escapeHtml(item.id)}">\u505c\u6b62\u8865\u5f55</button></div>`;
       } else {
-        actionsHtml = `<div class="item-actions"><button class="btn small supplement-btn" type="button" data-action="supplement" data-record-id="${escapeHtml(item.id)}"${busy ? " disabled" : ""}>\u8865\u5f55\u95ee\u9898\u63cf\u8ff0</button></div>`;
+        actionsHtml = `<div class="item-actions"><button class="btn small supplement-btn" type="button" data-action="supplement" data-record-id="${escapeHtml(item.id)}"${busy ? " disabled" : ""}>\u8865\u5f55\u95ee\u9898\u63cf\u8ff0</button>${commonActions}</div>`;
       }
     } else if (canRetry) {
       actionsHtml = `<div class="item-actions"><button class="btn small retry-btn" type="button" data-action="retry" data-record-id="${escapeHtml(item.id)}" ${
         retryDisabled ? "disabled" : ""
-      }>${escapeHtml(retryLabel)}</button></div>`;
+      }>${escapeHtml(retryLabel)}</button>${commonActions}</div>`;
+    } else {
+      actionsHtml = `<div class="item-actions">${commonActions}</div>`;
     }
 
     li.innerHTML = `
@@ -1400,6 +1459,153 @@ function categoryChipClass(category) {
     default:
       return "";
   }
+}
+
+function deleteRecord(recordId) {
+  const record = resolveRecord(recordId);
+  if (!record) {
+    return;
+  }
+  const confirmed = window.confirm(
+    "\u786e\u5b9a\u8981\u5220\u9664\u8fd9\u6761\u8bb0\u5f55\u5417\uff1f\u6b64\u64cd\u4f5c\u4e0d\u53ef\u64a4\u9500\u3002"
+  );
+  if (!confirmed) {
+    return;
+  }
+
+  records = records.filter((item) => item.id !== recordId);
+  recordAudioBlobs.delete(recordId);
+  workflows.delete(recordId);
+  retryingRecords.delete(recordId);
+  if (supplementTargetId === recordId) {
+    supplementTargetId = null;
+  }
+  if (editingRecordId === recordId) {
+    closeEditModal();
+  }
+  saveRecords();
+  renderList();
+  setStatus("\u5df2\u5220\u9664\u8be5\u6761\u8bb0\u5f55\u3002", "ok");
+}
+
+function openEditModal(recordId) {
+  const record = resolveRecord(recordId);
+  if (!record || !refs.editModal || !refs.editForm) {
+    return;
+  }
+
+  editingRecordId = recordId;
+  refs.editTime.value = String(record.createdAtLabel || "");
+  refs.editLocation.value = String(record.location || "");
+  refs.editAsr.value = String(record.asrText || "");
+  refs.editAi.value = String(record.aiText || "");
+  refs.editModal.removeAttribute("hidden");
+  refs.editCancelBtn?.focus();
+}
+
+function closeEditModal() {
+  if (!refs.editModal || refs.editModal.hasAttribute("hidden")) {
+    return;
+  }
+  refs.editModal.setAttribute("hidden", "");
+  editingRecordId = null;
+}
+
+function onEditBackdropClick(event) {
+  if (event.target !== refs.editModal) {
+    return;
+  }
+  closeEditModal();
+}
+
+function onEditFormSubmit(event) {
+  event.preventDefault();
+  if (!editingRecordId) {
+    closeEditModal();
+    return;
+  }
+  const record = resolveRecord(editingRecordId);
+  if (!record) {
+    closeEditModal();
+    return;
+  }
+
+  const time = toCleanText(refs.editTime.value);
+  const location = toCleanText(refs.editLocation.value);
+  const asrText = toCleanText(refs.editAsr.value);
+  const aiText = toCleanText(refs.editAi.value);
+
+  const patch = {
+    createdAtLabel: time || record.createdAtLabel,
+    location: location || record.location,
+    asrText,
+    aiText
+  };
+
+  if (record.status === "error" && (aiText || asrText)) {
+    patch.status = "done";
+    patch.error = "";
+  } else if (record.status === "draft" && aiText) {
+    patch.status = "done";
+    patch.error = "";
+  }
+
+  updateRecord(editingRecordId, patch);
+  closeEditModal();
+  setStatus("\u8bb0\u5f55\u5df2\u4fdd\u5b58\u3002", "ok");
+}
+
+function exportSingleRecord(recordId) {
+  const record = resolveRecord(recordId);
+  if (!record) {
+    return;
+  }
+
+  const aiText = String(record.aiText || "").trim();
+  const asrText = String(record.asrText || "").trim();
+  if (!aiText && !asrText) {
+    setStatus("\u8be5\u8bb0\u5f55\u6682\u65e0\u53ef\u5bfc\u51fa\u5185\u5bb9\u3002", "warn");
+    return;
+  }
+
+  const statusLabel =
+    record.status === "done"
+      ? "\u5b8c\u6210"
+      : record.status === "error"
+      ? "\u5931\u8d25"
+      : record.status === "draft"
+      ? "\u6682\u5b58"
+      : "\u5904\u7406\u4e2d";
+
+  const lines = [
+    `\u65f6\u95f4\uff1a${String(record.createdAtLabel || "").trim()}`,
+    `\u5730\u70b9\uff1a${String(record.location || "").trim()}`,
+    `\u72b6\u6001\uff1a${statusLabel}`
+  ];
+  if (record.category) {
+    lines.push(`\u7c7b\u522b\uff1a${record.category}`);
+  }
+  if (asrText) {
+    lines.push(`ASR\uff1a\n${asrText}`);
+  }
+  if (aiText) {
+    lines.push(`AI\uff1a\n${aiText}`);
+  }
+  if (toCleanText(record.error)) {
+    lines.push(`\u9519\u8bef\uff1a${String(record.error).trim()}`);
+  }
+
+  const text = lines.join("\n");
+  const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `record_${dateStamp(new Date())}.txt`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  setStatus("\u5df2\u5bfc\u51fa\u8be5\u6761\u8bb0\u5f55\u3002", "ok");
 }
 
 function onExportTxt() {
@@ -1580,10 +1786,12 @@ function onClearAll() {
   retryingRecords.clear();
   recordAudioBlobs.clear();
   supplementTargetId = null;
+  editingRecordId = null;
   records = [];
   saveRecords();
   renderList();
   closeExportModal();
+  closeEditModal();
   setStatus("\u5217\u8868\u5df2\u6e05\u7a7a\u3002", "ok");
 }
 
@@ -1620,6 +1828,20 @@ function saveRecords() {
 }
 
 function cleanupAudioGraph() {
+  releaseAudioNodes();
+  if (mediaStream) {
+    mediaStream.getTracks().forEach((track) => track.stop());
+    mediaStream = null;
+  }
+  if (audioContext) {
+    audioContext.close();
+    audioContext = null;
+  }
+}
+
+// Disconnects per-recording nodes but keeps the mic stream + AudioContext warm
+// so iOS Safari does not re-prompt for mic permission on the next recording.
+function releaseAudioNodes() {
   if (workletNode) {
     workletNode.port.onmessage = null;
     workletNode.disconnect();
@@ -1633,14 +1855,6 @@ function cleanupAudioGraph() {
   if (sourceNode) {
     sourceNode.disconnect();
     sourceNode = null;
-  }
-  if (mediaStream) {
-    mediaStream.getTracks().forEach((track) => track.stop());
-    mediaStream = null;
-  }
-  if (audioContext) {
-    audioContext.close();
-    audioContext = null;
   }
 }
 
